@@ -1,6 +1,7 @@
 // src/services/monitoringService.ts - IMPROVED WITH PNL TRACKING + X402 SUBSCRIPTION
 
 import * as cron from 'node-cron';
+import { Prisma } from '@prisma/client';
 import { DlmmService } from './dlmmService';
 import { WalletService } from './walletService';
 import { Telegraf } from 'telegraf';
@@ -351,7 +352,7 @@ export class MonitoringService {
     newEntryBin: number
   ): Promise<void> {
     try {
-      await prisma.$transaction(async (tx) => {
+      await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
         // Close old position with tracking
         await db.closePositionWithTracking(
           oldPositionId,

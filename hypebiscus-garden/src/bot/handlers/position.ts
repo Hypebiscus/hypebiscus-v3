@@ -1,4 +1,5 @@
 import { Context } from 'telegraf';
+import { Position } from '@prisma/client';
 import { DlmmService } from '../../services/dlmmService';
 import { WalletService } from '../../services/walletService';
 import { MonitoringService } from '../../services/monitoringService';
@@ -314,7 +315,7 @@ export class PositionHandler {
       }
 
       const { Markup } = await import('telegraf');
-      const buttons = activePositions.map((pos, index) => {
+      const buttons = activePositions.map((pos: Position, index: number) => {
         return [
           Markup.button.callback(
             `Close Position ${index + 1}: ${Number(pos.zbtcAmount).toFixed(6)} ZBTC`,
@@ -356,7 +357,7 @@ export class PositionHandler {
       );
 
       const positions = await getActivePositions(user.id);
-      const position = positions.find(p => p.positionId === positionId);
+      const position = positions.find((p: Position) => p.positionId === positionId);
 
       if (!position) {
         await ctx.editMessageText(
@@ -416,7 +417,7 @@ export class PositionHandler {
       }
 
       const positions = await getActivePositions(user.id);
-      const position = positions.find(p => p.positionId === positionId);
+      const position = positions.find((p: Position) => p.positionId === positionId);
 
       if (!position) {
         throw new Error('Position not found');

@@ -1,5 +1,5 @@
 // Database service using Prisma + Supabase
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient, Position } from '@prisma/client';
 
 export const prisma = new PrismaClient();
 
@@ -128,9 +128,9 @@ export async function getPositionStats(userId: string) {
     where: { userId, isActive: false },
   });
 
-  const totalPnl = positions.reduce((sum, pos) => sum + (Number(pos.pnlPercent) || 0), 0);
+  const totalPnl = positions.reduce((sum: number, pos: Position) => sum + (Number(pos.pnlPercent) || 0), 0);
   const avgPnl = positions.length > 0 ? totalPnl / positions.length : 0;
-  const winCount = positions.filter(pos => (Number(pos.pnlPercent) || 0) > 0).length;
+  const winCount = positions.filter((pos: Position) => (Number(pos.pnlPercent) || 0) > 0).length;
   const winRate = positions.length > 0 ? (winCount / positions.length) * 100 : 0;
 
   return {
@@ -228,9 +228,9 @@ export async function updateUserStats(userId: string) {
     prisma.position.count({ where: { userId, isActive: true } })
   ]);
 
-  const totalZbtcFees = positions.reduce((sum, p) => sum + Number(p.zbtcFees || 0), 0);
-  const totalSolFees = positions.reduce((sum, p) => sum + Number(p.solFees || 0), 0);
-  const totalPnlUsd = positions.reduce((sum, p) => sum + Number(p.pnlUsd || 0), 0);
+  const totalZbtcFees = positions.reduce((sum: number, p: Position) => sum + Number(p.zbtcFees || 0), 0);
+  const totalSolFees = positions.reduce((sum: number, p: Position) => sum + Number(p.solFees || 0), 0);
+  const totalPnlUsd = positions.reduce((sum: number, p: Position) => sum + Number(p.pnlUsd || 0), 0);
 
   return prisma.userStats.upsert({
     where: { userId },
