@@ -1,0 +1,347 @@
+=====================================================
+MCP INTEGRATION ANALYSIS - CURRENT STATE
+=====================================================
+
+## 1. MCP SERVER STATUS
+- Hosted on: Render (Free Tier)
+- Port: 3001
+- Status: ✅ Online and Ready
+- First request: 30-60s cold start
+- Subsequent requests: <2s
+
+=====================================================
+## 2. PAGES USING MCP INTEGRATION
+=====================================================
+
+### A. HOME PAGE (/)
+Component: ChatBox.tsx
+Location: src/components/dashboard-components/ChatBox.tsx
+
+MCP Functions Used:
+1. get_user_positions_with_sync
+   - Triggered: When user asks about "my positions", "my portfolio"
+   - Requires: Wallet connected + 1 credit payment
+   - Returns: User's active DLMM positions
+   - Line: 292
+
+2. check_subscription (via usePaymentVerification hook)
+   - Triggered: Before any paid query
+   - Checks: Active subscription or credit balance
+   - Line: 269
+
+3. get_credit_balance (via usePaymentVerification hook)
+   - Triggered: Before paid queries
+   - Returns: Available credits count
+
+Current Payment Flow in ChatBox:
+- User asks about positions → Check payment → Show modal if no credits
+- Modal: CreditsPurchaseModal (line 30)
+- After payment: Query executes automatically
+
+---
+
+### B. HOME PAGE (/) - Pool Metrics Dashboard
+Component: PoolMetricsDashboard.tsx (Toggle view)
+Location: src/components/dashboard-components/PoolMetricsDashboard.tsx
+
+MCP Functions Used:
+1. getPoolMetrics()
+   - Pool: zBTC-SOL by default
+   - Auto-refresh: Every 30 seconds
+   - Returns: Liquidity, APY, fees, volume, prices
+   - Line: 68
+
+Note: Currently REMOVED from home page (no toggle anymore)
+
+---
+
+### C. WALLET PAGE (/wallet)
+Uses: useHybridPositions hook
+Location: src/hooks/useHybridPositions.ts
+
+MCP Functions Used:
+1. getUserPositionsWithSync()
+   - Syncs: Database + Live blockchain data
+   - Auto-refresh: Configurable interval
+   - Returns: Complete position data with PnL
+
+---
+
+### D. PRICING PAGE (/mcp)
+Components: SubscriptionStatusCard, CreditsPurchaseModal
+
+MCP Functions Used:
+1. check_subscription
+   - Shows: Current subscription status
+   - Component: SubscriptionStatusCard.tsx (line 40)
+
+2. get_credit_balance
+   - Shows: Available credits count
+   - Component: SubscriptionStatusCard.tsx (line 49)
+
+3. purchase_credits
+   - Triggered: When user buys credits
+   - Component: CreditsPurchaseModal
+
+---
+
+### E. WALLET LINKING (Wallet page)
+Component: WalletLinkingCard.tsx
+Location: src/components/mcp-components/WalletLinkingCard.tsx
+
+MCP Functions Used:
+1. generate_wallet_link_token (line 79)
+   - Creates: 5-minute temporary token
+   - Returns: QR code, deep link, short code
+   - Purpose: Link wallet to Telegram
+
+2. get_linked_account (lines 169, 214)
+   - Checks: Current linking status
+   - Polls: Every 3 seconds when linking
+   - Returns: Telegram username, user ID
+
+3. link_wallet (handled by Telegram bot)
+   - Called by: Telegram bot when user sends /link command
+
+=====================================================
+## 3. ALL AVAILABLE MCP FUNCTIONS (From Server)
+=====================================================
+
+### METEORA POOL FUNCTIONS ⭐ (For ChatBox Integration)
+
+1. get_pool_metrics
+   - What: Pool liquidity, APY, fees, volume
+   - Parameters: poolAddress (optional), walletAddress (optional)
+   - Use case: "Show me zBTC-SOL pool stats"
+
+2. get_bin_distribution
+   - What: Liquidity spread across price bins
+   - Parameters: poolAddress, rangeSize, includeEmptyBins
+   - Use case: "Where is liquidity concentrated?"
+
+3. get_user_positions_with_sync ✅ (Already in ChatBox)
+   - What: User's active/closed positions
+   - Parameters: walletAddress, includeHistorical, includeLive
+   - Use case: "Show my positions"
+
+4. get_wallet_performance
+   - What: Total PnL, fees collected, win rate
+   - Parameters: walletAddress
+   - Use case: "How am I performing?"
+
+5. get_position_details
+   - What: Detailed info for specific position
+   - Parameters: positionId, poolAddress
+   - Use case: "Tell me about position XYZ"
+
+6. get_dlmm_position
+   - What: Live blockchain position data
+   - Parameters: positionAddress, poolAddress
+   - Use case: Real-time position status
+
+### REBALANCING FUNCTIONS ⭐ (For ChatBox)
+
+7. calculate_rebalance
+   - What: Position health check, rebalance needs
+   - Parameters: positionId, poolAddress, bufferBins
+   - Use case: "Should I rebalance?"
+
+8. analyze_reposition
+   - What: Reposition recommendation analysis
+   - Parameters: positionAddress, poolAddress
+   - Use case: "Is it time to reposition?"
+
+9. prepare_reposition
+   - What: Create unsigned reposition transaction
+   - Parameters: positionAddress, walletAddress, strategy, binRange
+   - Use case: Execute reposition
+
+10. get_position_chain
+    - What: Reposition history for a position
+    - Parameters: positionAddress
+    - Use case: "Show reposition history"
+
+11. get_wallet_reposition_stats
+    - What: Wallet's reposition statistics
+    - Parameters: walletAddress
+    - Use case: "My reposition performance"
+
+### PAYMENT & SUBSCRIPTION FUNCTIONS ✅ (Already in use)
+
+12. check_subscription
+    - Current: Used in usePaymentVerification hook
+
+13. get_credit_balance
+    - Current: Used in usePaymentVerification hook
+
+14. purchase_credits
+    - Current: Used in CreditsPurchaseModal
+
+### WALLET LINKING FUNCTIONS ✅ (Already in use)
+
+15. generate_wallet_link_token
+    - Current: Used in WalletLinkingCard
+
+16. link_wallet_by_short_token
+    - Current: Called by Telegram bot
+
+17. get_linked_account
+    - Current: Used in WalletLinkingCard
+
+18. unlink_wallet
+    - Current: Available but not used in UI
+
+=====================================================
+## 4. WHAT'S MISSING IN CHATBOX
+=====================================================
+
+Currently in ChatBox (Line 234-242):
+✅ Educational queries (free)
+✅ Pool recommendation queries (free)
+✅ Swap requests (free - opens Jupiter)
+✅ Position data queries (paid - 1 credit)
+✅ Automation queries (shows Telegram prompt)
+
+NOT YET IN CHATBOX:
+❌ get_pool_metrics - Pool statistics
+❌ get_bin_distribution - Liquidity distribution
+❌ get_wallet_performance - Overall performance
+❌ calculate_rebalance - Rebalance recommendations
+❌ analyze_reposition - Reposition analysis
+❌ Credit purchase UI in chatbox
+❌ Telegram link integration for automation
+
+=====================================================
+## 5. INTEGRATION PLAN FOR YOUR GOALS
+=====================================================
+
+### GOAL 1: Meteora Functions in ChatBox
+Add these patterns to ChatBox.tsx MESSAGE_PATTERNS:
+
+poolMetrics: [
+  /show.*pool.*stats/i,
+  /pool.*metrics/i,
+  /zbtc.*sol.*info/i,
+]
+
+binDistribution: [
+  /liquidity.*distribution/i,
+  /where.*liquidity/i,
+  /show.*bins/i,
+]
+
+walletPerformance: [
+  /my.*performance/i,
+  /how.*am.*i.*doing/i,
+  /overall.*pnl/i,
+]
+
+rebalanceCheck: [
+  /should.*rebalance/i,
+  /position.*health/i,
+  /need.*to.*rebalance/i,
+]
+
+### GOAL 2: Credit Payment in ChatBox
+Add CreditsPurchaseModal to ChatBox UI (already imported on line 30)
+
+Current: Modal only shown when user triggers paid query
+New: Add permanent "Buy Credits" button in chat header
+
+### GOAL 3: Telegram Redirect for Automation
+Current: showTelegramPrompt state exists (line 73) but not fully used
+
+Add:
+- Detect automation queries (already done - line 240)
+- Show Telegram deep link with wallet linking
+- Integrate WalletLinkingCard flow into chatbox
+
+=====================================================
+## 6. TELEGRAM BOT INTEGRATION
+=====================================================
+
+Bot Link: @hypebiscus_garden_bot (from WalletLinkingCard.tsx line 435)
+
+Linking Methods:
+1. Deep Link: Opens Telegram directly
+2. QR Code: Scan with phone
+3. Manual Code: 8-char code via /link command
+
+After Linking:
+User can use Telegram bot for:
+- Automated position monitoring
+- Rebalance alerts
+- Performance notifications
+
+=====================================================
+## 7. PAYMENT REQUIREMENTS
+=====================================================
+
+Free Features:
+- Educational queries
+- Pool recommendations
+- Swap requests (Jupiter)
+- Basic chat
+
+Paid Features (1 credit = $0.01):
+- View positions (get_user_positions_with_sync)
+- Pool metrics (get_pool_metrics)
+- Performance stats (get_wallet_performance)
+- Rebalance analysis (calculate_rebalance)
+- Bin distribution (get_bin_distribution)
+
+Premium Subscription ($4.99/month):
+- Unlimited queries
+- All MCP features
+- Telegram automation
+
+=====================================================
+## 8. CURRENT CHATBOX FLOW
+=====================================================
+
+User Message → analyzeMessageIntent() → Route to handler
+
+Handlers:
+1. Educational → Direct AI response
+2. Pool request → poolSearchService
+3. Swap → Open Jupiter Plugin
+4. MCP data → Check payment → Execute or show modal
+5. Automation → Show Telegram prompt
+
+Payment Check (line 269):
+verifyAccess({
+  requireCredits: 1,
+  action: 'view your positions'
+})
+
+If no access:
+- Set pendingMCPQuery
+- Show CreditsPurchaseModal
+- After payment: Auto-execute query
+
+=====================================================
+## 9. NEXT STEPS TO IMPLEMENT YOUR GOALS
+=====================================================
+
+1. Add new intent patterns for Meteora functions
+2. Create handler functions for each MCP tool
+3. Add credit purchase button to chat UI
+4. Integrate Telegram linking into automation flow
+5. Show deep link when automation is requested
+6. Display payment options inline in chat
+
+=====================================================
+## 10. CODE LOCATIONS REFERENCE
+=====================================================
+
+MCP Client: src/lib/services/mcpClient.ts
+API Route: src/app/api/mcp/route.ts
+ChatBox: src/components/dashboard-components/ChatBox.tsx
+Payment Hook: src/hooks/usePaymentVerification.ts
+Credit Modal: src/components/mcp-components/CreditsPurchaseModal.tsx
+Wallet Linking: src/components/mcp-components/WalletLinkingCard.tsx
+Subscription Card: src/components/mcp-components/SubscriptionStatusCard.tsx
+
+=====================================================
+END OF ANALYSIS
+=====================================================

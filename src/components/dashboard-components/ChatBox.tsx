@@ -130,6 +130,15 @@ const ChatBox: React.FC = () => {
       /sell.*for/i,
       /jupiter/i,
     ],
+    // NEW: Pool Metrics Queries (requires payment)
+    poolMetricsQuery: [
+      /pool.*(?:metrics|stats|statistics)/i,
+      /show.*pool.*(?:info|data)/i,
+      /(?:zbtc|btc|sol).*pool.*(?:stats|info)/i,
+      /pool.*(?:apy|fees|volume|liquidity)/i,
+      /what.*is.*pool.*doing/i,
+      /pool.*performance/i,
+    ],
     // NEW: MCP Data Queries (requires payment)
     mcpDataQuery: [
       /my positions?/i,
@@ -231,6 +240,11 @@ const ChatBox: React.FC = () => {
       pattern.test(lowerMessage)
     );
 
+    // Check for pool metrics queries (requires payment)
+    const isPoolMetricsQuery = MESSAGE_PATTERNS.poolMetricsQuery.some(pattern =>
+      pattern.test(lowerMessage)
+    );
+
     // Check for MCP data queries (requires payment)
     const isMCPDataQuery = MESSAGE_PATTERNS.mcpDataQuery.some(pattern =>
       pattern.test(lowerMessage)
@@ -246,9 +260,10 @@ const ChatBox: React.FC = () => {
       isPoolRequest,
       isAlternativeRequest,
       isSwapRequest,
+      isPoolMetricsQuery,
       isMCPDataQuery,
       isAutomationQuery,
-      isGeneralChat: !isEducational && !isPoolRequest && !isAlternativeRequest && !isSwapRequest && !isMCPDataQuery && !isAutomationQuery
+      isGeneralChat: !isEducational && !isPoolRequest && !isAlternativeRequest && !isSwapRequest && !isPoolMetricsQuery && !isMCPDataQuery && !isAutomationQuery
     };
   }, [MESSAGE_PATTERNS]);
 
@@ -256,6 +271,44 @@ const ChatBox: React.FC = () => {
   const handleSwapRequest = useCallback(async () => {
     addMessage("assistant", "I'll open Jupiter Plugin for you to swap tokens. Jupiter Plugin provides the best rates across all Solana DEXes.");
     setShowJupiterPlugin(true); // Changed from setShowJupiterTerminal
+  }, [addMessage]);
+
+  // Handle pool metrics queries (FREE - no payment required)
+  const handlePoolMetricsQuery = useCallback(async () => {
+    try {
+      addMessage("assistant", "📊 Fetching pool metrics from Meteora...");
+      setIsLoading(true);
+
+      const poolData = await mcpClient.getPoolMetrics();
+
+      if (poolData) {
+        const priceKeys = Object.keys(poolData.prices);
+        const token0Price = priceKeys[0] ? poolData.prices[priceKeys[0]] : undefined;
+        const token1Price = priceKeys[1] ? poolData.prices[priceKeys[1]] : undefined;
+
+        const summary = `✅ **${poolData.poolName}** Pool Metrics:\n\n` +
+          `💰 **Total Liquidity**: $${poolData.liquidity.totalUSD.toLocaleString()}\n` +
+          `📈 **APY**: ${poolData.metrics.apy.toFixed(2)}%\n` +
+          `💵 **24h Fees**: $${poolData.metrics.fees24h.toLocaleString()}\n` +
+          `📊 **24h Volume**: $${poolData.metrics.volume24h.toLocaleString()}\n` +
+          `🔢 **Bin Step**: ${poolData.metrics.binStep}\n\n` +
+          `**Token Prices**:\n` +
+          `• ${poolData.liquidity.tokenA.symbol}: $${token0Price?.usd.toLocaleString() || 'N/A'}` +
+          `${token0Price?.change24h ? ` (${token0Price.change24h > 0 ? '+' : ''}${token0Price.change24h.toFixed(2)}% 24h)` : ''}\n` +
+          `• ${poolData.liquidity.tokenB.symbol}: $${token1Price?.usd.toLocaleString() || 'N/A'}` +
+          `${token1Price?.change24h ? ` (${token1Price.change24h > 0 ? '+' : ''}${token1Price.change24h.toFixed(2)}% 24h)` : ''}\n\n` +
+          (poolData.recommendation ? `💡 **Recommendation**: ${poolData.recommendation}` : '');
+
+        addMessage("assistant", summary);
+      } else {
+        addMessage("assistant", "❌ Unable to fetch pool metrics. Please try again.");
+      }
+    } catch (error) {
+      console.error('Pool metrics query error:', error);
+      addMessage("assistant", "❌ Failed to fetch pool metrics. Please try again.");
+    } finally {
+      setIsLoading(false);
+    }
   }, [addMessage]);
 
   // Handle MCP data queries (positions, performance - REQUIRES PAYMENT)
@@ -315,41 +368,61 @@ const ChatBox: React.FC = () => {
     } finally {
       setIsLoading(false);
     }
-  }, [connected, publicKey, verifyAccess, addMessage, mcpClient]);
+  }, [connected, publicKey, verifyAccess, addMessage]);
 
-  // Handle automation queries (auto-reposition - REQUIRES PAYMENT)
-  const handleAutomationQuery = useCallback(async (userMessage: string) => {
+  // Handle automation queries (auto-reposition - linking is FREE, but repositions cost money)
+  const handleAutomationQuery = useCallback(async () => {
     if (!connected || !publicKey) {
       addMessage("assistant", "🔐 Please connect your wallet to enable automation.");
       return;
     }
 
-    // Check payment status
-    const accessResult = await verifyAccess({
-      requireCredits: 1,
-      action: 'enable automation',
-    });
-
-    if (!accessResult.hasAccess) {
-      // No payment - show payment modal
-      setPendingMCPQuery(userMessage);
-      setShowPaymentModal(true);
-      addMessage(
-        "assistant",
-        `💳 To enable auto-repositioning, you need credits or a subscription:\n\n**Pay-as-you-go**: $0.01 per reposition\n**Premium**: $4.99/month for unlimited repositions\n\nClick below to get started!`
-      );
-      return;
-    }
-
-    // Has access - explain automation
+    // Explain automation - linking is free, but repositions cost credits/subscription
     addMessage(
       "assistant",
-      `🤖 **Auto-Repositioning** is now available!\n\n**How it works**:\n1. Our AI monitors your positions 24/7\n2. When a position goes out of range, we notify you\n3. You can auto-reposition with one click\n\n**Setup**: Link your Telegram account to receive notifications and enable automation.\n\nWould you like me to help you link your Telegram account?`
+      `🤖 **Auto-Repositioning** is available!\n\n**How it works:**\n1. Our AI monitors your positions 24/7\n2. When a position goes out of range, we notify you via Telegram\n3. You can auto-reposition with one click\n\n⚡ **Next Step:** Link your Telegram account to enable automation.\n\nGenerating your Telegram link token...`
     );
 
-    // Show Telegram linking prompt
-    setShowTelegramPrompt(true);
-  }, [connected, publicKey, verifyAccess, addMessage]);
+    try {
+      const walletAddress = publicKey.toBase58();
+      const response = await mcpClient.callTool('generate_wallet_link_token', {
+        walletAddress,
+        expiresInMinutes: 5,
+      }) as { deepLink?: string; shortToken?: string; qrCodeData?: string; error?: string; message?: string };
+
+      // Check if response has error
+      if (response?.error) {
+        if (response.error === 'VALIDATION_ERROR' && response.message?.includes('already linked')) {
+          addMessage(
+            "assistant",
+            `✅ **Your wallet is already linked to Telegram!**\n\n🤖 Automation is ready to use. You'll receive notifications via Telegram when your positions need rebalancing.\n\n📱 **Open Telegram Bot:** [Click here to open bot](https://t.me/hypebiscus_garden_bot)\n\nOr visit the [Wallet page](/wallet?tab=link) to manage your connection.`
+          );
+        } else {
+          addMessage(
+            "assistant",
+            `⚠️ ${response.message || 'Failed to generate link token'}\n\nPlease visit the [Wallet page](/wallet?tab=link) to manage your Telegram connection.`
+          );
+        }
+        return;
+      }
+
+      if (response?.deepLink) {
+        addMessage(
+          "assistant",
+          `✅ **Telegram Link Ready!**\n\n**Option 1:** Click the link to open Telegram:\n👉 [Open Telegram Bot](${response.deepLink})\n\n**Option 2:** Or visit the [Wallet page](/wallet?tab=link) to see QR code and manual code options.\n\n⏱️ Link expires in 5 minutes.`
+        );
+        setShowTelegramPrompt(true);
+      } else {
+        throw new Error('Failed to generate link token');
+      }
+    } catch (error) {
+      console.error('Telegram link generation error:', error);
+      addMessage(
+        "assistant",
+        `❌ Failed to generate Telegram link. Please visit the [Wallet page](/wallet?tab=link) to link manually.`
+      );
+    }
+  }, [connected, publicKey, addMessage]);
 
   // Streaming response handler
   const handleStreamingResponse = useCallback(async (
@@ -716,10 +789,12 @@ const ChatBox: React.FC = () => {
         const intent = analyzeMessageIntent(userMessage);
 
         // Route to appropriate handler based on intent (prioritize paid features)
-        if (intent.isMCPDataQuery) {
+        if (intent.isPoolMetricsQuery) {
+          await handlePoolMetricsQuery();
+        } else if (intent.isMCPDataQuery) {
           await handleMCPDataQuery(userMessage);
         } else if (intent.isAutomationQuery) {
-          await handleAutomationQuery(userMessage);
+          await handleAutomationQuery();
         } else if (intent.isSwapRequest) {
           await handleSwapRequest();
         } else if (intent.isEducational) {
@@ -745,6 +820,7 @@ const ChatBox: React.FC = () => {
       inputMessage,
       addMessage,
       analyzeMessageIntent,
+      handlePoolMetricsQuery,
       handleMCPDataQuery,
       handleAutomationQuery,
       handleSwapRequest,

@@ -47,8 +47,6 @@ export function usePaymentVerification() {
     try {
       const walletAddress = publicKey.toBase58();
 
-      console.log('🔍 Checking payment status for:', walletAddress);
-
       // Check subscription status
       // mcpClient.callTool() already parses the response
       const subData = await mcpClient.callTool('check_subscription', {
@@ -139,19 +137,19 @@ export function usePaymentVerification() {
       };
     }
 
-    // Use credits
+    // Use credits via MCP server
     try {
       const walletAddress = publicKey.toBase58();
       console.log('💳 Using', requireCredits, 'credits for:', action);
 
-      await mcpClient.callTool('use_credits', {
+      const result = await mcpClient.callTool('use_credits', {
         walletAddress,
         amount: requireCredits,
         purpose: action,
-      });
+      }) as { success?: boolean; newBalance?: number; balance?: number };
 
-      // Update local state
-      const newBalance = currentStatus.creditsBalance - requireCredits;
+      const newBalance = result?.newBalance ?? result?.balance ?? (currentStatus.creditsBalance - requireCredits);
+
       setStatus(prev => ({
         ...prev,
         creditsBalance: newBalance,
@@ -167,10 +165,12 @@ export function usePaymentVerification() {
       };
     } catch (error) {
       console.error('❌ Credit use failed:', error);
+      // Still allow access but warn about deduction failure
       return {
-        hasAccess: false,
-        reason: 'credit_use_failed',
-        message: error instanceof Error ? error.message : 'Failed to use credits',
+        hasAccess: true,
+        reason: 'credits_not_deducted',
+        message: `Access granted (credit deduction may have failed)`,
+        creditsRemaining: currentStatus.creditsBalance,
       };
     }
   }, [connected, publicKey, checkPaymentStatus]);

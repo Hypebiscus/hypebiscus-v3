@@ -432,7 +432,7 @@ export function WalletLinkingCard({ onLinkSuccess, onLinkError }: WalletLinkingC
                     In Telegram, send: <code className="bg-gray-900 px-2 py-1 rounded text-primary">/link {linkToken.shortToken}</code>
                   </p>
                   <p className="text-xs text-gray-500">
-                    to <a href="https://t.me/testhypegarden_bot" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">@testhypegarden_bot</a>
+                    to <a href="https://t.me/hypebiscus_garden_bot" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">@hypebiscus_garden_bot</a>
                   </p>
                 </div>
               </div>

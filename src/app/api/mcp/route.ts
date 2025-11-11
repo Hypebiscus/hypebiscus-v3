@@ -308,6 +308,19 @@ export async function GET() {
           }
         },
         {
+          name: 'use_credits',
+          description: 'Deduct credits from wallet balance',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              walletAddress: { type: 'string' },
+              amount: { type: 'number' },
+              purpose: { type: 'string' }
+            },
+            required: ['walletAddress', 'amount']
+          }
+        },
+        {
           name: 'get_position_details',
           description: 'Get detailed position information',
           inputSchema: {

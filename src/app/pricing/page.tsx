@@ -2,7 +2,8 @@
 
 import React, { useState } from 'react';
 import { useWallet } from '@solana/wallet-adapter-react';
-import PageTemplate from '@/components/PageTemplate';
+import Header from '@/components/header';
+import Menu from '@/components/menu';
 import { SubscriptionModal } from '@/components/mcp-components/SubscriptionModal';
 import { CreditsPurchaseModal } from '@/components/mcp-components/CreditsPurchaseModal';
 import { Button } from '@/components/ui/button';
@@ -24,23 +25,29 @@ export default function PricingPage() {
   const [showCreditsModal, setShowCreditsModal] = useState(false);
 
   return (
-    <PageTemplate>
-      <div className="max-w-7xl mx-auto px-4 py-12">
-        {/* Header */}
-        <div className="text-center mb-16">
-          <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-primary/20 mb-6">
-            <Sparkle size={32} className="text-primary" weight="fill" />
-          </div>
-          <h1 className="text-5xl font-bold text-white mb-4">
-            Choose Your Plan
-          </h1>
-          <p className="text-xl text-gray-400 max-w-2xl mx-auto">
-            Automate your liquidity positions and maximize your returns with AI-powered management
-          </p>
+    <div className="flex min-h-screen flex-col relative">
+      <Header />
+      <main className="w-full flex-1 lg:gap-4 relative lg:px-[70px] px-4 mt-6 lg:mt-0">
+        <div className="absolute top-0 left-4 lg:flex justify-center items-center h-full hidden">
+          <Menu />
         </div>
+        <div className="flex-1">
+          <div className="max-w-6xl mx-auto py-8">
+            {/* Header */}
+            <div className="text-center mb-12">
+              <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-primary/20 mb-6">
+                <Sparkle size={32} className="text-primary" weight="fill" />
+              </div>
+              <h1 className="text-4xl font-bold text-white mb-4">
+                Choose Your Plan
+              </h1>
+              <p className="text-lg text-gray-400 max-w-2xl mx-auto">
+                Automate your liquidity positions with AI-powered management
+              </p>
+            </div>
 
-        {/* Pricing Cards */}
-        <div className="grid md:grid-cols-2 gap-8 mb-16">
+            {/* Pricing Cards */}
+            <div className="grid md:grid-cols-2 gap-6 max-w-5xl mx-auto">
           {/* Subscription Plan */}
           <div className="border border-primary/30 rounded-2xl p-8 bg-gradient-to-br from-primary/10 to-transparent relative overflow-hidden">
             <div className="absolute top-4 right-4">
@@ -198,109 +205,11 @@ export default function PricingPage() {
                 Connect your wallet to purchase
               </p>
             )}
-          </div>
-        </div>
-
-        {/* Feature Comparison */}
-        <div className="border border-border rounded-2xl overflow-hidden bg-gray-900/50">
-          <div className="p-6 border-b border-border">
-            <h3 className="text-2xl font-bold text-white">Feature Comparison</h3>
-          </div>
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead>
-                <tr className="border-b border-border">
-                  <th className="text-left p-4 text-gray-400 font-medium">Feature</th>
-                  <th className="text-center p-4 text-gray-400 font-medium">Free</th>
-                  <th className="text-center p-4 text-gray-400 font-medium">Pay-As-You-Go</th>
-                  <th className="text-center p-4 text-primary font-medium">Premium</th>
-                </tr>
-              </thead>
-              <tbody className="text-sm">
-                <tr className="border-b border-border/50">
-                  <td className="p-4 text-white">View Positions</td>
-                  <td className="p-4 text-center"><Check size={20} className="text-green-400 mx-auto" weight="bold" /></td>
-                  <td className="p-4 text-center"><Check size={20} className="text-green-400 mx-auto" weight="bold" /></td>
-                  <td className="p-4 text-center"><Check size={20} className="text-green-400 mx-auto" weight="bold" /></td>
-                </tr>
-                <tr className="border-b border-border/50">
-                  <td className="p-4 text-white">Performance Analytics</td>
-                  <td className="p-4 text-center"><Check size={20} className="text-green-400 mx-auto" weight="bold" /></td>
-                  <td className="p-4 text-center"><Check size={20} className="text-green-400 mx-auto" weight="bold" /></td>
-                  <td className="p-4 text-center"><Check size={20} className="text-green-400 mx-auto" weight="bold" /></td>
-                </tr>
-                <tr className="border-b border-border/50">
-                  <td className="p-4 text-white">Wallet Linking</td>
-                  <td className="p-4 text-center"><Check size={20} className="text-green-400 mx-auto" weight="bold" /></td>
-                  <td className="p-4 text-center"><Check size={20} className="text-green-400 mx-auto" weight="bold" /></td>
-                  <td className="p-4 text-center"><Check size={20} className="text-green-400 mx-auto" weight="bold" /></td>
-                </tr>
-                <tr className="border-b border-border/50">
-                  <td className="p-4 text-white">Auto-Repositions</td>
-                  <td className="p-4 text-center text-gray-600">-</td>
-                  <td className="p-4 text-center text-gray-300">$0.01 per use</td>
-                  <td className="p-4 text-center text-primary font-medium">Unlimited</td>
-                </tr>
-                <tr className="border-b border-border/50">
-                  <td className="p-4 text-white">AI Chat Assistant</td>
-                  <td className="p-4 text-center text-gray-600">-</td>
-                  <td className="p-4 text-center text-gray-300">1 credit/query</td>
-                  <td className="p-4 text-center text-primary font-medium">Unlimited</td>
-                </tr>
-                <tr className="border-b border-border/50">
-                  <td className="p-4 text-white">Telegram Notifications</td>
-                  <td className="p-4 text-center text-gray-600">-</td>
-                  <td className="p-4 text-center"><Check size={20} className="text-green-400 mx-auto" weight="bold" /></td>
-                  <td className="p-4 text-center"><Check size={20} className="text-green-400 mx-auto" weight="bold" /></td>
-                </tr>
-                <tr className="border-b border-border/50">
-                  <td className="p-4 text-white">Priority Support</td>
-                  <td className="p-4 text-center text-gray-600">-</td>
-                  <td className="p-4 text-center text-gray-600">-</td>
-                  <td className="p-4 text-center"><Check size={20} className="text-green-400 mx-auto" weight="bold" /></td>
-                </tr>
-                <tr>
-                  <td className="p-4 text-white">Advanced Analytics</td>
-                  <td className="p-4 text-center text-gray-600">-</td>
-                  <td className="p-4 text-center text-gray-600">-</td>
-                  <td className="p-4 text-center"><Check size={20} className="text-green-400 mx-auto" weight="bold" /></td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        {/* FAQ Section */}
-        <div className="mt-16">
-          <h3 className="text-2xl font-bold text-white text-center mb-8">Frequently Asked Questions</h3>
-          <div className="grid md:grid-cols-2 gap-6">
-            <div className="border border-border rounded-lg p-6 bg-gray-900/50">
-              <h4 className="font-semibold text-white mb-2">How do auto-repositions work?</h4>
-              <p className="text-sm text-gray-400">
-                Our AI monitors your liquidity positions 24/7 and automatically rebalances them when they go out of range, ensuring optimal returns without manual intervention.
-              </p>
-            </div>
-            <div className="border border-border rounded-lg p-6 bg-gray-900/50">
-              <h4 className="font-semibold text-white mb-2">Can I cancel my subscription?</h4>
-              <p className="text-sm text-gray-400">
-                Yes! You can cancel anytime from your settings. Your subscription will remain active until the end of the current billing period.
-              </p>
-            </div>
-            <div className="border border-border rounded-lg p-6 bg-gray-900/50">
-              <h4 className="font-semibold text-white mb-2">Do credits expire?</h4>
-              <p className="text-sm text-gray-400">
-                No, credits never expire. Buy once and use them whenever you need. Perfect for occasional users who don&apos;t need a subscription.
-              </p>
-            </div>
-            <div className="border border-border rounded-lg p-6 bg-gray-900/50">
-              <h4 className="font-semibold text-white mb-2">Which plan is right for me?</h4>
-              <p className="text-sm text-gray-400">
-                If you have multiple active positions or trade frequently, Premium is best. For occasional use, pay-as-you-go credits are more cost-effective.
-              </p>
+              </div>
             </div>
           </div>
         </div>
-      </div>
+      </main>
 
       {/* Modals */}
       <SubscriptionModal
@@ -314,6 +223,6 @@ export default function PricingPage() {
         onClose={() => setShowCreditsModal(false)}
         onSuccess={() => setShowCreditsModal(false)}
       />
-    </PageTemplate>
+    </div>
   );
 }

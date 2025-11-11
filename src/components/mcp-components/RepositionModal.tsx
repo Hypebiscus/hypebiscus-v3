@@ -47,6 +47,7 @@ export function RepositionModal({
   // Load analysis on mount
   useEffect(() => {
     loadAnalysis();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [positionId]);
 
   const loadAnalysis = async () => {

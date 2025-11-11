@@ -70,6 +70,7 @@ export function SubscriptionStatusCard() {
     }, 500);
 
     return () => clearTimeout(timeoutId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [publicKey, connected]);
 
   if (!connected) {

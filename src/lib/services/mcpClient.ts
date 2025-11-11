@@ -158,15 +158,25 @@ class MCPClientService {
       });
 
       if (response.error) {
-        throw new Error(response.error.message);
+        const errorMessage = response.error.message || response.error.data || JSON.stringify(response.error);
+        throw new Error(`MCP tool ${toolName} failed: ${errorMessage}`);
       }
 
       // Extract and parse MCP protocol response
-      const result = response.result as { content?: Array<{ type: string; text: string }> };
-      const resultText = result?.content?.[0]?.text;
+      const result = response.result as { content?: Array<{ type: string; text?: string; value?: unknown }> };
+
+      // Check for content array
+      if (!result?.content || !Array.isArray(result.content) || result.content.length === 0) {
+        throw new Error(`Invalid response format from MCP server. Tool: ${toolName}`);
+      }
+
+      const firstContent = result.content[0];
+
+      // Try text field first (standard MCP format)
+      const resultText = firstContent?.text || (typeof firstContent?.value === 'string' ? firstContent.value : null);
 
       if (!resultText) {
-        throw new Error('Empty response from MCP server');
+        throw new Error(`Empty response from MCP server. Tool: ${toolName}`);
       }
 
       // Try to parse as JSON
