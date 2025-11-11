@@ -2,7 +2,7 @@
 "use client"
 
 import { Button } from "@/components/ui/button"
-import { HouseIcon, WalletIcon, LightningIcon } from "@phosphor-icons/react"
+import { HouseIcon, WalletIcon, LightningIcon, ChartLineIcon } from "@phosphor-icons/react"
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 
@@ -13,6 +13,11 @@ const Menu = () => {
       label: "Home",
       icon: HouseIcon,
       path: "/",
+    },
+    {
+      label: "Dashboard",
+      icon: ChartLineIcon,
+      path: "/dashboard",
     },
     {
       label: "Premium",
