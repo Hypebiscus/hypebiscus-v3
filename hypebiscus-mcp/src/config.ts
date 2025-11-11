@@ -42,8 +42,8 @@ export const config: Config = {
 export const API_ENDPOINTS = {
   meteoraBase: 'https://dlmm-api.meteora.ag',
   birdeyeBase: 'https://public-api.birdeye.so',
-  // Use Jupiter lite-api v2 (free, no auth required)
-  jupiterPriceBase: 'https://lite-api.jup.ag/price/v2',
+  // Use Jupiter lite-api v3 (free, no auth required)
+  jupiterPriceBase: 'https://lite-api.jup.ag/price/v3',
 } as const;
 
 // Validation constants

@@ -18,8 +18,8 @@ services:
       - key: NODE_ENV
         value: production
 
-      - key: HTTP_PORT
-        value: 3001
+      # Note: PORT is automatically set by Render
+      # HTTP server will use process.env.PORT from Render
 
       - key: SOLANA_NETWORK
         value: mainnet-beta

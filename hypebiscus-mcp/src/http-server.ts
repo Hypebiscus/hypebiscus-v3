@@ -211,7 +211,7 @@ class MCPHttpBridge {
       this.server = http.createServer(async (req, res) => {
         // CORS headers
         res.setHeader('Access-Control-Allow-Origin', '*');
-        res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+        res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
         res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
         // Handle preflight
@@ -221,7 +221,14 @@ class MCPHttpBridge {
           return;
         }
 
-        // Only accept POST
+        // Handle GET /health for Render health checks
+        if (req.method === 'GET' && req.url === '/health') {
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ status: 'ok', ready: this.isReady }));
+          return;
+        }
+
+        // Only accept POST for MCP calls
         if (req.method !== 'POST') {
           res.writeHead(405, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ error: 'Method not allowed' }));

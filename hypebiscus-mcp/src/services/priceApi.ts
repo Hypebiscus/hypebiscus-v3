@@ -103,7 +103,7 @@ export class PriceApiService {
     try {
       const response = await withRetry(
         async () => {
-          logger.debug(`Fetching price from Jupiter lite-api v2: ${tokenSymbol} (${tokenAddress})`);
+          logger.debug(`Fetching price from Jupiter lite-api v3: ${tokenSymbol} (${tokenAddress})`);
           return await this.jupiterClient.get('', {
             params: {
               ids: tokenAddress, // Use mint address
@@ -114,13 +114,15 @@ export class PriceApiService {
         1000
       );
 
-      // Jupiter lite-api v2 returns data keyed by mint address
-      if (response.data?.data?.[tokenAddress]) {
-        const data = response.data.data[tokenAddress];
-        const price = typeof data.price === 'string' ? parseFloat(data.price) : data.price;
+      // Jupiter lite-api v3 returns data directly keyed by mint address (no "data" wrapper)
+      // Response format: { "So11...112": { "usdPrice": 159.40, "priceChange24h": -4.38, ... } }
+      if (response.data?.[tokenAddress]) {
+        const data = response.data[tokenAddress];
+        const price = typeof data.usdPrice === 'string' ? parseFloat(data.usdPrice) : data.usdPrice;
+        const change24h = typeof data.priceChange24h === 'string' ? parseFloat(data.priceChange24h) : data.priceChange24h;
         return {
           price: price || 0,
-          change24h: 0, // Jupiter lite-api v2 doesn't provide 24h change
+          change24h: change24h || 0,
         };
       }
 
