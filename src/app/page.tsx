@@ -1,11 +1,16 @@
 "use client";
 
-// import News from "@/components/dashboard-components/News";
+import { useState } from "react";
 import ChatBox from "@/components/dashboard-components/ChatBox";
+import PoolMetricsDashboard from "@/components/dashboard-components/PoolMetricsDashboard";
 import Header from "@/components/header";
 import Menu from "@/components/menu";
+import { Button } from "@/components/ui/button";
+import { ChartLine, ChatCircle } from "@phosphor-icons/react";
 
 export default function Home() {
+  const [showMetrics, setShowMetrics] = useState(false);
+
   return (
     <div className="flex min-h-screen flex-col relative">
       <Header />
@@ -14,11 +19,37 @@ export default function Home() {
           <Menu />
         </div>
         <div className="flex-1">
-          <ChatBox />
+          {/* Toggle Button */}
+          <div className="flex justify-end mb-4 gap-2">
+            <Button
+              variant={!showMetrics ? "default" : "outline"}
+              size="sm"
+              onClick={() => setShowMetrics(false)}
+              className="flex items-center gap-2"
+            >
+              <ChatCircle size={16} weight={!showMetrics ? "fill" : "regular"} />
+              AI Chat
+            </Button>
+            <Button
+              variant={showMetrics ? "default" : "outline"}
+              size="sm"
+              onClick={() => setShowMetrics(true)}
+              className="flex items-center gap-2"
+            >
+              <ChartLine size={16} weight={showMetrics ? "bold" : "regular"} />
+              Pool Metrics
+            </Button>
+          </div>
+
+          {/* Content */}
+          {showMetrics ? (
+            <div className="py-4">
+              <PoolMetricsDashboard />
+            </div>
+          ) : (
+            <ChatBox />
+          )}
         </div>
-        {/* <div className="lg:w-[408px]">
-          <News />
-        </div> */}
       </main>
     </div>
   );

@@ -102,15 +102,21 @@ const PoolMetricsDashboard: React.FC = () => {
   }
 
   if (error) {
+    const is502Error = error.includes('502');
+    const errorMessage = is502Error
+      ? '🔄 MCP server is waking up from sleep (Render free tier). This may take 30-60 seconds...'
+      : `⚠️ ${error}`;
+
     return (
-      <Alert variant="destructive">
+      <Alert variant={is502Error ? "default" : "destructive"}>
         <AlertDescription className="flex items-center justify-between">
-          <span>⚠️ {error}</span>
+          <span>{errorMessage}</span>
           <button
             onClick={fetchPoolMetrics}
             className="text-sm underline hover:no-underline"
+            disabled={loading}
           >
-            Retry
+            {loading ? 'Retrying...' : 'Retry'}
           </button>
         </AlertDescription>
       </Alert>
