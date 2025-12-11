@@ -732,7 +732,6 @@ const WalletPage = () => {
   const [pnlData, setPnlData] = useState<Map<string, PositionPnLResult>>(new Map());
   const [loadingPnl, setLoadingPnl] = useState(false);
   const [userTier, setUserTier] = useState<UserTierInfo | null>(null);
-  const [loadingTier, setLoadingTier] = useState(false);
 
   // Check for tab query parameter
   useEffect(() => {
@@ -868,7 +867,7 @@ const WalletPage = () => {
   >(new Map());
 
   // Fetch PnL data for all positions
-  const fetchPnLData = async (positionsMap: Map<string, unknown>) => {
+  const fetchPnLData = React.useCallback(async (positionsMap: Map<string, unknown>) => {
     if (!publicKey) return;
 
     setLoadingPnl(true);
@@ -928,7 +927,7 @@ const WalletPage = () => {
     } finally {
       setLoadingPnl(false);
     }
-  };
+  }, [publicKey]);
 
   // Calculate estimated PnL when deposit tracking is not available
   const calculateEstimatedPnL = async (pos: PositionType, pool: PoolWithActiveId): Promise<PositionPnLResult> => {
@@ -1051,7 +1050,7 @@ const WalletPage = () => {
     } else {
       setPnlData(new Map());
     }
-  }, [filteredPositions, publicKey]);
+  }, [filteredPositions, publicKey, fetchPnLData]);
 
   const positionsArray = Array.from(filteredPositions.entries());
 
