@@ -731,6 +731,7 @@ const WalletPage = () => {
   const [activeTab, setActiveTab] = useState<"positions" | "link">("positions");
   const [pnlData, setPnlData] = useState<Map<string, PositionPnLResult>>(new Map());
   const [loadingPnl, setLoadingPnl] = useState(false);
+  const [loadingTier, setLoadingTier] = useState(false);
   const [userTier, setUserTier] = useState<UserTierInfo | null>(null);
 
   // Check for tab query parameter

@@ -1,29 +1,31 @@
 /**
- * Payment Client for Subscription and Credits
- * Creates USDC payment transactions for subscriptions and credits
+ * x402 Payment Client for Subscriptions and Credits
+ *
+ * Properly implements the x402 protocol using the official x402-solana SDK.
+ * Handles automatic HTTP 402 payment flows with PayAI Network facilitator.
+ *
+ * Architecture:
+ * 1. Client makes request to x402-protected API endpoint
+ * 2. Server returns HTTP 402 with PaymentRequirements
+ * 3. SDK automatically constructs payment, signs with wallet
+ * 4. SDK retries request with X-PAYMENT header
+ * 5. Server verifies payment via facilitator, returns content
  */
 
-import { Connection, PublicKey, Transaction, VersionedTransaction } from '@solana/web3.js';
-import { getAssociatedTokenAddress, createTransferInstruction, TOKEN_PROGRAM_ID } from '@solana/spl-token';
-
-// USDC mint addresses
-const USDC_MAINNET = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
-const USDC_DEVNET = '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU';
-
-// Treasury wallet for receiving payments
-const TREASURY_WALLET = process.env.NEXT_PUBLIC_TREASURY_WALLET || 'YV2C7YyrkH67jTRZHvwovJfSK6BqiJJMycmRSXSWEy2';
+import { createX402Client } from '@payai/x402-solana/client';
+import type { WalletAdapter } from '@payai/x402-solana/client';
+import { PublicKey, Transaction, VersionedTransaction } from '@solana/web3.js';
 
 // Network configuration
 const NETWORK = process.env.NEXT_PUBLIC_SOLANA_NETWORK === 'mainnet-beta' ? 'solana' : 'solana-devnet';
-const USDC_MINT = NETWORK === 'solana' ? USDC_MAINNET : USDC_DEVNET;
 const RPC_URL = process.env.NEXT_PUBLIC_SOLANA_RPC_URL || 'https://api.devnet.solana.com';
 
-// Pricing (USDC micro-units, 6 decimals)
+// Pricing constants (exported for UI display)
 export const SUBSCRIPTION_PRICE = 4.99;
 export const SUBSCRIPTION_PRICE_MICRO_USDC = 4_990_000; // $4.99 USDC
 
 export const CREDIT_PACKAGES = {
-  trial: { amount: 1, price: 0.01, priceInMicro: 10_000 }, // Trial: 1 credit for testing
+  trial: { amount: 1, price: 0.01, priceInMicro: 10_000 },
   starter: { amount: 1000, price: 10.00, priceInMicro: 10_000_000 },
   power: { amount: 2500, price: 25.00, priceInMicro: 25_000_000 },
   pro: { amount: 5000, price: 50.00, priceInMicro: 50_000_000 },
@@ -31,199 +33,180 @@ export const CREDIT_PACKAGES = {
 
 export type CreditPackage = keyof typeof CREDIT_PACKAGES;
 
-interface PaymentResult {
+// Payment result interface
+export interface PaymentResult {
   success: boolean;
   signature?: string;
   error?: string;
+  data?: unknown;
 }
 
 /**
- * Payment Client - Creates USDC transfer transactions
+ * Create x402 client with Solana wallet adapter
  */
-class PaymentClient {
-  private connection: Connection;
-
-  constructor() {
-    this.connection = new Connection(RPC_URL, 'confirmed');
+export function createHypebiscusX402Client(
+  wallet: {
+    publicKey: PublicKey | null;
+    signTransaction: ((tx: Transaction) => Promise<Transaction>) |
+                      ((tx: VersionedTransaction) => Promise<VersionedTransaction>);
+  }
+): ReturnType<typeof createX402Client> {
+  if (!wallet.publicKey) {
+    throw new Error('Wallet not connected');
   }
 
-  /**
-   * Purchase subscription - Creates USDC transfer transaction
-   * @param walletPublicKey - User's wallet public key
-   * @param signTransaction - Wallet adapter's sign transaction function
-   * @returns Payment result with transaction signature
-   */
-  async purchaseSubscription(
-    walletPublicKey: PublicKey,
-    signTransaction: (tx: Transaction | VersionedTransaction) => Promise<Transaction | VersionedTransaction>
-  ): Promise<PaymentResult> {
-    try {
-      console.log('Purchasing subscription for:', walletPublicKey.toBase58());
-
-      // Create USDC transfer transaction
-      const transaction = new Transaction();
-      const treasuryPubkey = new PublicKey(TREASURY_WALLET);
-      const usdcMintPubkey = new PublicKey(USDC_MINT);
-
-      // Get associated token accounts
-      const fromTokenAccount = await getAssociatedTokenAddress(
-        usdcMintPubkey,
-        walletPublicKey
-      );
-
-      const toTokenAccount = await getAssociatedTokenAddress(
-        usdcMintPubkey,
-        treasuryPubkey
-      );
-
-      // Create transfer instruction
-      const transferIx = createTransferInstruction(
-        fromTokenAccount,
-        toTokenAccount,
-        walletPublicKey,
-        SUBSCRIPTION_PRICE_MICRO_USDC,
-        [],
-        TOKEN_PROGRAM_ID
-      );
-
-      transaction.add(transferIx);
-
-      // Get recent blockhash
-      const { blockhash } = await this.connection.getLatestBlockhash('confirmed');
-      transaction.recentBlockhash = blockhash;
-      transaction.feePayer = walletPublicKey;
-
-      // Sign transaction with wallet
-      const signedTx = await signTransaction(transaction) as Transaction;
-
-      // Send and confirm transaction
-      const signature = await this.connection.sendRawTransaction(signedTx.serialize());
-      await this.connection.confirmTransaction(signature, 'confirmed');
-
-      console.log('Subscription payment successful:', signature);
-
-      // Call backend to create subscription record
-      const response = await fetch('/api/payments', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action: 'create_subscription',
-          walletAddress: walletPublicKey.toBase58(),
-          paymentTxSignature: signature,
-          x402PaymentProof: signature, // For now use signature as proof
-        }),
-      });
-
-      const result = await response.json();
-
-      if (!response.ok || !result.success) {
-        throw new Error(result.error || 'Failed to record subscription');
-      }
-
-      return {
-        success: true,
-        signature,
-      };
-    } catch (error) {
-      console.error('Subscription purchase failed:', error);
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : 'Payment failed',
-      };
+  // Adapt Solana wallet to x402 WalletAdapter interface
+  // Official x402-solana supports both publicKey object OR address string
+  // Using address string for simplicity (matches official examples)
+  const walletAdapter: WalletAdapter = {
+    address: wallet.publicKey.toBase58(),
+    signTransaction: async (tx: VersionedTransaction) => {
+      // Solana wallet adapters can sign both Transaction and VersionedTransaction
+      const signed = await wallet.signTransaction(tx as unknown as Transaction & VersionedTransaction);
+      return signed as VersionedTransaction;
     }
+  };
+
+  return createX402Client({
+    wallet: walletAdapter,
+    network: NETWORK as 'solana' | 'solana-devnet',
+    rpcUrl: RPC_URL,
+    maxPaymentAmount: BigInt(100_000_000), // $100 max payment
+  });
+}
+
+/**
+ * Purchase subscription using x402 protocol
+ *
+ * @param wallet - Solana wallet adapter
+ * @returns Payment result with transaction signature
+ */
+export async function purchaseSubscription(
+  wallet: {
+    publicKey: PublicKey | null;
+    signTransaction: ((tx: Transaction) => Promise<Transaction>) |
+                      ((tx: VersionedTransaction) => Promise<VersionedTransaction>);
   }
-
-  /**
-   * Purchase credits - Creates USDC transfer transaction
-   * @param walletPublicKey - User's wallet public key
-   * @param packageName - Credit package to purchase
-   * @param signTransaction - Wallet adapter's sign transaction function
-   * @returns Payment result with transaction signature
-   */
-  async purchaseCredits(
-    walletPublicKey: PublicKey,
-    packageName: CreditPackage,
-    signTransaction: (tx: Transaction | VersionedTransaction) => Promise<Transaction | VersionedTransaction>
-  ): Promise<PaymentResult> {
-    try {
-      const pkg = CREDIT_PACKAGES[packageName];
-      console.log(`Purchasing ${pkg.amount} credits for $${pkg.price}`);
-
-      // Create USDC transfer transaction
-      const transaction = new Transaction();
-      const treasuryPubkey = new PublicKey(TREASURY_WALLET);
-      const usdcMintPubkey = new PublicKey(USDC_MINT);
-
-      // Get associated token accounts
-      const fromTokenAccount = await getAssociatedTokenAddress(
-        usdcMintPubkey,
-        walletPublicKey
-      );
-
-      const toTokenAccount = await getAssociatedTokenAddress(
-        usdcMintPubkey,
-        treasuryPubkey
-      );
-
-      // Create transfer instruction
-      const transferIx = createTransferInstruction(
-        fromTokenAccount,
-        toTokenAccount,
-        walletPublicKey,
-        pkg.priceInMicro,
-        [],
-        TOKEN_PROGRAM_ID
-      );
-
-      transaction.add(transferIx);
-
-      // Get recent blockhash
-      const { blockhash } = await this.connection.getLatestBlockhash('confirmed');
-      transaction.recentBlockhash = blockhash;
-      transaction.feePayer = walletPublicKey;
-
-      // Sign transaction with wallet
-      const signedTx = await signTransaction(transaction) as Transaction;
-
-      // Send and confirm transaction
-      const signature = await this.connection.sendRawTransaction(signedTx.serialize());
-      await this.connection.confirmTransaction(signature, 'confirmed');
-
-      console.log('Credits payment successful:', signature);
-
-      // Call backend to add credits
-      const response = await fetch('/api/payments', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action: 'purchase_credits',
-          walletAddress: walletPublicKey.toBase58(),
-          creditsAmount: pkg.amount,
-          usdcAmountPaid: pkg.price,
-          paymentTxSignature: signature,
-          x402PaymentProof: signature, // For now use signature as proof
-        }),
-      });
-
-      const result = await response.json();
-
-      if (!response.ok || !result.success) {
-        throw new Error(result.error || 'Failed to record credits purchase');
-      }
-
-      return {
-        success: true,
-        signature,
-      };
-    } catch (error) {
-      console.error('Credits purchase failed:', error);
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : 'Payment failed',
-      };
+): Promise<PaymentResult> {
+  try {
+    if (!wallet.publicKey) {
+      throw new Error('Wallet not connected');
     }
+
+    console.log('[x402] Purchasing subscription for:', wallet.publicKey.toBase58());
+
+    // Create x402 client
+    const x402Client = createHypebiscusX402Client(wallet);
+
+    // Make request to x402-protected subscription endpoint
+    // The client will automatically handle the 402 flow:
+    // 1. GET /api/subscriptions/purchase → receives 402 response
+    // 2. Constructs payment transaction based on PaymentRequirements
+    // 3. Signs transaction with wallet
+    // 4. Retries GET with X-PAYMENT header
+    // 5. Server verifies payment and creates subscription
+    const response = await x402Client.fetch('/api/subscriptions/purchase', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        walletAddress: wallet.publicKey.toBase58(),
+        tier: 'premium'
+      }),
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ message: 'Payment failed' }));
+      throw new Error(error.message || `HTTP ${response.status}`);
+    }
+
+    const result = await response.json();
+
+    console.log('[x402] Subscription purchase successful:', result);
+
+    return {
+      success: true,
+      signature: result.transactionSignature,
+      data: result
+    };
+  } catch (error) {
+    console.error('[x402] Subscription purchase failed:', error);
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Payment failed',
+    };
   }
 }
 
-// Export singleton instance
-export const x402PaymentClient = new PaymentClient();
+/**
+ * Purchase credits using x402 protocol
+ *
+ * @param wallet - Solana wallet adapter
+ * @param packageName - Credit package to purchase
+ * @returns Payment result with transaction signature
+ */
+export async function purchaseCredits(
+  wallet: {
+    publicKey: PublicKey | null;
+    signTransaction: ((tx: Transaction) => Promise<Transaction>) |
+                      ((tx: VersionedTransaction) => Promise<VersionedTransaction>);
+  },
+  packageName: CreditPackage
+): Promise<PaymentResult> {
+  try {
+    if (!wallet.publicKey) {
+      throw new Error('Wallet not connected');
+    }
+
+    const pkg = CREDIT_PACKAGES[packageName];
+    console.log(`[x402] Purchasing ${pkg.amount} credits for $${pkg.price}`);
+
+    // Create x402 client
+    const x402Client = createHypebiscusX402Client(wallet);
+
+    // Make request to x402-protected credits endpoint
+    const response = await x402Client.fetch('/api/credits/purchase', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        walletAddress: wallet.publicKey.toBase58(),
+        package: packageName,
+        creditsAmount: pkg.amount,
+        expectedPrice: pkg.price
+      }),
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ message: 'Payment failed' }));
+      throw new Error(error.message || `HTTP ${response.status}`);
+    }
+
+    const result = await response.json();
+
+    console.log('[x402] Credits purchase successful:', result);
+
+    return {
+      success: true,
+      signature: result.transactionSignature,
+      data: result
+    };
+  } catch (error) {
+    console.error('[x402] Credits purchase failed:', error);
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Payment failed',
+    };
+  }
+}
+
+/**
+ * Legacy x402PaymentClient for backward compatibility
+ * Wraps the new x402 SDK-based functions
+ */
+export const x402PaymentClient = {
+  purchaseSubscription,
+  purchaseCredits,
+};

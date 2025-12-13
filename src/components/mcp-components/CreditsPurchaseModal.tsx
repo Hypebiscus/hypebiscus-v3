@@ -4,7 +4,7 @@ import React, { useState } from 'react';
 import { useWallet } from '@solana/wallet-adapter-react';
 import { Wallet as WalletIcon, X, Check, CreditCard } from '@phosphor-icons/react';
 import { Button } from '@/components/ui/button';
-import { x402PaymentClient, CREDIT_PACKAGES, type CreditPackage } from '@/lib/x402Client';
+import { purchaseCredits, CREDIT_PACKAGES, type CreditPackage } from '@/lib/x402Client';
 import { showToast } from '@/lib/utils/showToast';
 
 interface CreditsPurchaseModalProps {
@@ -27,12 +27,12 @@ export function CreditsPurchaseModal({ isOpen, onClose, onSuccess }: CreditsPurc
 
     setLoading(true);
     try {
-      showToast.info('Processing Payment', 'Please approve the transaction in your wallet...');
+      showToast.info('Processing Payment', 'Please approve the payment in your wallet...');
 
-      const result = await x402PaymentClient.purchaseCredits(
-        publicKey,
-        selectedPackage,
-        signTransaction
+      // Use the new x402 SDK-based client
+      const result = await purchaseCredits(
+        { publicKey, signTransaction },
+        selectedPackage
       );
 
       if (result.success && result.signature) {
@@ -52,7 +52,7 @@ export function CreditsPurchaseModal({ isOpen, onClose, onSuccess }: CreditsPurc
         throw new Error(result.error || 'Payment failed');
       }
     } catch (error) {
-      console.error('Credits purchase error:', error);
+      console.error('[x402] Credits purchase error:', error);
       showToast.error(
         'Payment Failed',
         error instanceof Error ? error.message : 'Please try again'

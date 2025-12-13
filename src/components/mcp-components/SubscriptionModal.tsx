@@ -4,7 +4,7 @@ import React, { useState } from 'react';
 import { useWallet } from '@solana/wallet-adapter-react';
 import { Lightning, X, Check, Wallet } from '@phosphor-icons/react';
 import { Button } from '@/components/ui/button';
-import { x402PaymentClient, SUBSCRIPTION_PRICE } from '@/lib/x402Client';
+import { purchaseSubscription, SUBSCRIPTION_PRICE } from '@/lib/x402Client';
 import { showToast } from '@/lib/utils/showToast';
 
 interface SubscriptionModalProps {
@@ -26,9 +26,10 @@ export function SubscriptionModal({ isOpen, onClose, onSuccess }: SubscriptionMo
 
     setLoading(true);
     try {
-      showToast.info('Processing Payment', 'Please approve the transaction in your wallet...');
+      showToast.info('Processing Payment', 'Please approve the payment in your wallet...');
 
-      const result = await x402PaymentClient.purchaseSubscription(publicKey, signTransaction);
+      // Use the new x402 SDK-based client
+      const result = await purchaseSubscription({ publicKey, signTransaction });
 
       if (result.success && result.signature) {
         setTxSignature(result.signature);
@@ -43,7 +44,7 @@ export function SubscriptionModal({ isOpen, onClose, onSuccess }: SubscriptionMo
         throw new Error(result.error || 'Payment failed');
       }
     } catch (error) {
-      console.error('Subscription error:', error);
+      console.error('[x402] Subscription error:', error);
       showToast.error(
         'Payment Failed',
         error instanceof Error ? error.message : 'Please try again'
