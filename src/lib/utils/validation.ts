@@ -9,6 +9,7 @@ export interface ChatRequestBody {
   messages: ChatMessage[]
   poolData?: Record<string, unknown>
   portfolioStyle?: string
+  walletAddress?: string
 }
 
 export class ValidationError extends Error {
@@ -23,7 +24,7 @@ export function validateChatRequest(body: unknown): ChatRequestBody {
     throw new ValidationError('Invalid request body')
   }
 
-  const { messages, poolData, portfolioStyle } = body as Record<string, unknown>
+  const { messages, poolData, portfolioStyle, walletAddress } = body as Record<string, unknown>
 
   // Validate messages array
   if (!messages || !Array.isArray(messages)) {
@@ -93,10 +94,27 @@ export function validateChatRequest(body: unknown): ChatRequestBody {
     }
   }
 
-  return { 
-    messages: messages as ChatMessage[], 
-    poolData: poolData as Record<string, unknown> | undefined, 
-    portfolioStyle: portfolioStyle as string | undefined 
+  // Validate walletAddress if provided (for premium features)
+  if (walletAddress !== undefined) {
+    if (typeof walletAddress !== 'string') {
+      throw new ValidationError('Wallet address must be a string', 'walletAddress')
+    }
+
+    // Basic Solana address validation (32-44 characters, base58)
+    if (walletAddress.length < 32 || walletAddress.length > 44) {
+      throw new ValidationError('Invalid wallet address length', 'walletAddress')
+    }
+
+    if (!/^[1-9A-HJ-NP-Za-km-z]+$/.test(walletAddress)) {
+      throw new ValidationError('Invalid wallet address format', 'walletAddress')
+    }
+  }
+
+  return {
+    messages: messages as ChatMessage[],
+    poolData: poolData as Record<string, unknown> | undefined,
+    portfolioStyle: portfolioStyle as string | undefined,
+    walletAddress: walletAddress as string | undefined
   }
 }
 
@@ -204,7 +222,8 @@ export function validateMCPRequest(body: unknown): { isValid: boolean; error?: s
       'get_wallet_reposition_stats',
       'calculate_position_pnl',
       'close_position',
-      'get_wallet_pnl'
+      'get_wallet_pnl',
+      'sync_wallet_positions'
     ];
 
     if (!availableTools.includes(params.name)) {

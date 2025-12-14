@@ -145,7 +145,8 @@ export function usePaymentVerification() {
       const result = await mcpClient.callTool('use_credits', {
         walletAddress,
         amount: requireCredits,
-        purpose: action,
+        description: action,
+        relatedResourceId: action, // For tracking what the credits were used for
       }) as { success?: boolean; newBalance?: number; balance?: number };
 
       const newBalance = result?.newBalance ?? result?.balance ?? (currentStatus.creditsBalance - requireCredits);

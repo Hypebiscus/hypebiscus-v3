@@ -38,6 +38,7 @@ import { useCredits, UseCreditsSchema, UseCreditsInput } from './tools/useCredit
 import { calculatePositionPnL_tool, formatCalculatePnLError, CalculatePositionPnLInput } from './tools/calculatePositionPnL.js';
 import { closePosition_tool, formatClosePositionError, ClosePositionInput } from './tools/closePosition.js';
 import { getWalletPnL_tool, formatWalletPnL, formatWalletPnLError, GetWalletPnLInput } from './tools/getWalletPnL.js';
+import { syncWalletPositions, SyncWalletPositionsInput } from './tools/syncWalletPositions.js';
 import { PoolMetricsInput } from './tools/types.js';
 import {
   GetUserByWalletInput,
@@ -656,6 +657,21 @@ const TOOLS: Tool[] = [
       required: ['walletAddress'],
     },
   },
+  {
+    name: 'sync_wallet_positions',
+    description:
+      'Manually syncs wallet positions to database for historical tracking and PnL calculation. Requires credits or active subscription. Returns sync status and number of positions synced.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        walletAddress: {
+          type: 'string',
+          description: 'Solana wallet address to sync positions for',
+        },
+      },
+      required: ['walletAddress'],
+    },
+  },
 ];
 
 // Zod schemas for input validation
@@ -775,6 +791,10 @@ const ClosePositionSchema = z.object({
 const GetWalletPnLSchema = z.object({
   walletAddress: z.string(),
   includeClosedPositions: z.boolean().optional(),
+});
+
+const SyncWalletPositionsSchema = z.object({
+  walletAddress: z.string(),
 });
 
 /**
@@ -1230,6 +1250,23 @@ class HypebiscusMCPServer {
             };
           }
 
+          case 'sync_wallet_positions': {
+            const validatedInput = SyncWalletPositionsSchema.parse(args);
+            const result = await syncWalletPositions(validatedInput as SyncWalletPositionsInput);
+
+            // Return JSON data for frontend consumption
+            const jsonOutput = JSON.stringify(result, null, 2);
+
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: jsonOutput,
+                },
+              ],
+            };
+          }
+
           default:
             throw new Error(`Unknown tool: ${name}`);
         }
@@ -1304,6 +1341,9 @@ class HypebiscusMCPServer {
             break;
           case 'get_wallet_pnl':
             errorMessage = formatWalletPnLError(error);
+            break;
+          case 'sync_wallet_positions':
+            errorMessage = `Error syncing wallet positions: ${error instanceof Error ? error.message : 'Unknown error'}`;
             break;
           default:
             errorMessage = formatToolError(error);

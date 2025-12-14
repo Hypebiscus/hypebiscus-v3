@@ -105,8 +105,102 @@ export class BackgroundSyncService {
   }
 
   /**
+   * Get all users eligible for position syncing
+   * Users qualify if they have ANY of:
+   * 1. isMonitoring = true (Telegram bot users - legacy)
+   * 2. Credits balance > 0
+   * 3. Active subscription
+   */
+  private async getEligibleUsers() {
+    try {
+      // 1. Get users with isMonitoring = true (Telegram bot users)
+      const telegramUsers = await prisma.users.findMany({
+        where: { isMonitoring: true },
+        include: {
+          wallets: {
+            select: {
+              publicKey: true,
+            },
+          },
+        },
+      });
+
+      // 2. Get wallet addresses with credits > 0
+      const walletsWithCredits = await prisma.user_credits.findMany({
+        where: {
+          balance: { gt: 0 },
+        },
+        select: {
+          walletAddress: true,
+        },
+      });
+
+      // 3. Get wallet addresses with active subscriptions
+      const walletsWithSubscriptions = await prisma.user_subscriptions.findMany({
+        where: {
+          status: 'active',
+          currentPeriodEnd: { gt: new Date() },
+        },
+        select: {
+          walletAddress: true,
+        },
+      });
+
+      // Collect all eligible wallet addresses
+      const eligibleWalletAddresses = new Set<string>([
+        ...walletsWithCredits.map((w) => w.walletAddress),
+        ...walletsWithSubscriptions.map((w) => w.walletAddress),
+      ]);
+
+      // 4. Get users whose wallets match the eligible addresses
+      const paidUsers = await prisma.users.findMany({
+        where: {
+          wallets: {
+            publicKey: {
+              in: Array.from(eligibleWalletAddresses),
+            },
+          },
+        },
+        include: {
+          wallets: {
+            select: {
+              publicKey: true,
+            },
+          },
+        },
+      });
+
+      // Combine telegram users and paid users (dedupe by user ID)
+      const allEligibleUsersMap = new Map();
+
+      for (const user of [...telegramUsers, ...paidUsers]) {
+        allEligibleUsersMap.set(user.id, user);
+      }
+
+      const allEligibleUsers = Array.from(allEligibleUsersMap.values());
+
+      logger.debug(
+        `Eligibility breakdown: ${telegramUsers.length} Telegram, ` +
+          `${walletsWithCredits.length} with credits, ` +
+          `${walletsWithSubscriptions.length} with subscriptions, ` +
+          `${allEligibleUsers.length} total unique users`
+      );
+
+      return allEligibleUsers;
+    } catch (error) {
+      logger.error('Error fetching eligible users:', error);
+      return [];
+    }
+  }
+
+  /**
    * Main sync logic - processes all monitored wallets
    * This is the entry point for each sync cycle
+   *
+   * Syncs users who meet ANY of these criteria:
+   * 1. isMonitoring = true (Telegram bot users)
+   * 2. Have credits (balance > 0)
+   * 3. Have active subscription
    */
   private async syncAllWallets(): Promise<SyncStatistics> {
     const startTime = Date.now();
@@ -121,30 +215,19 @@ export class BackgroundSyncService {
     try {
       logger.info('=== Starting background sync cycle ===');
 
-      // Get all users with monitoring enabled
-      const monitoredUsers = await prisma.users.findMany({
-        where: {
-          isMonitoring: true,
-        },
-        include: {
-          wallets: {
-            select: {
-              publicKey: true,
-            },
-          },
-        },
-      });
+      // Get all eligible users (Telegram monitoring OR credits OR subscription)
+      const eligibleUsers = await this.getEligibleUsers();
 
-      logger.info(`Found ${monitoredUsers.length} monitored users`);
+      logger.info(`Found ${eligibleUsers.length} eligible users for sync`);
 
-      if (monitoredUsers.length === 0) {
-        logger.info('No monitored users found, sync complete');
+      if (eligibleUsers.length === 0) {
+        logger.info('No eligible users found, sync complete');
         stats.duration = Date.now() - startTime;
         return stats;
       }
 
       // Process each user's positions
-      for (const user of monitoredUsers) {
+      for (const user of eligibleUsers) {
         if (!user.wallets) {
           logger.warn(`User ${user.id} has no wallet, skipping`);
           continue;
@@ -173,7 +256,7 @@ export class BackgroundSyncService {
       stats.duration = Date.now() - startTime;
 
       logger.info(
-        `=== Sync cycle complete: ${stats.usersProcessed}/${monitoredUsers.length} users, ` +
+        `=== Sync cycle complete: ${stats.usersProcessed}/${eligibleUsers.length} users, ` +
           `${stats.positionsUpdated} positions updated, ${stats.positionsClosed} closed, ` +
           `${stats.errors.length} errors, ${stats.duration}ms ===`
       );
@@ -272,6 +355,9 @@ export class BackgroundSyncService {
             const minBinId = Math.min(...binIds);
 
             // Upsert position in database with source and linking info
+            // Calculate deposit value for PnL tracking
+            const depositValueUsd = xAmount * zbtcPrice + yAmount * solPrice;
+
             await prisma.positions.upsert({
               where: { positionId },
               create: {
@@ -290,6 +376,10 @@ export class BackgroundSyncService {
                 linkedWalletAddress, // Link to website wallet if exists
                 createdAt: new Date(),
                 lastChecked: new Date(),
+                // Enhanced PnL tracking fields
+                depositValueUsd,
+                depositTokenXPrice: zbtcPrice,
+                depositTokenYPrice: solPrice,
               },
               update: {
                 zbtcAmount: xAmount,
