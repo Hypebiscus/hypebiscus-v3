@@ -276,6 +276,82 @@ type PositionInfoLike = {
   [key: string]: unknown;
 };
 
+// Helper: Extract price range from bin data
+function extractPriceRange(binData: BinData[]): { minPrice: number; maxPrice: number } {
+  if (!binData || binData.length === 0) {
+    return { minPrice: 0, maxPrice: 0 };
+  }
+
+  const minPrice = binData[0].pricePerToken !== undefined
+    ? Number(binData[0].pricePerToken)
+    : 0;
+  const maxPrice = binData[binData.length - 1].pricePerToken !== undefined
+    ? Number(binData[binData.length - 1].pricePerToken)
+    : 0;
+
+  return { minPrice, maxPrice };
+}
+
+// Helper: Calculate current market price with fallbacks
+function calculateCurrentPrice(
+  pool: PoolWithActiveId,
+  binData: BinData[]
+): number {
+  // Primary: Use attached current market price
+  if (pool.currentMarketPrice !== undefined) {
+    return Number(pool.currentMarketPrice);
+  }
+
+  // Secondary: Find active bin in position data
+  if (binData && binData.length > 0 && pool.activeId !== undefined) {
+    const activeBin = binData.find((b: BinData) => b.binId === pool.activeId);
+    if (activeBin && activeBin.pricePerToken !== undefined) {
+      return Number(activeBin.pricePerToken);
+    }
+  }
+
+  // Tertiary: Use middle of position range
+  if (binData && binData.length > 0) {
+    const mid = Math.floor(binData.length / 2);
+    if (binData[mid] && binData[mid].pricePerToken !== undefined) {
+      return Number(binData[mid].pricePerToken);
+    }
+  }
+
+  return 0;
+}
+
+// Helper: Resolve token decimals with fallbacks
+function resolveDecimals(
+  posDecimals: unknown,
+  poolDecimals: unknown,
+  positionInfo: PositionInfoLike | undefined,
+  tokenKey: 'tokenX' | 'tokenY'
+): number {
+  if (typeof posDecimals === "number") return posDecimals;
+  if (typeof poolDecimals === "number") return poolDecimals;
+
+  const infoDecimals = positionInfo?.[tokenKey]?.mint?.decimals;
+  if (typeof infoDecimals === "number") return infoDecimals;
+
+  return 0;
+}
+
+// Helper: Calculate token amounts from raw values
+function calculateTokenAmount(rawAmount: unknown, decimals: number): number {
+  return rawAmount ? Number(rawAmount) / Math.pow(10, decimals) : 0;
+}
+
+// Helper: Calculate USD value for token pair
+function calculateUSDValue(
+  amount1: number,
+  price1: number,
+  amount2: number,
+  price2: number
+): number {
+  return amount1 * price1 + amount2 * price2;
+}
+
 // Custom hook for extracting and formatting position display data
 function usePositionDisplayData(
   pos: PositionType,
@@ -285,82 +361,49 @@ function usePositionDisplayData(
   positionInfo?: PositionInfoLike
 ) {
   const binData = pos.positionData.positionBinData as BinData[];
-  const minPrice =
-    binData && binData.length > 0 && binData[0].pricePerToken !== undefined
-      ? Number(binData[0].pricePerToken)
-      : 0;
-  const maxPrice =
-    binData &&
-    binData.length > 0 &&
-    binData[binData.length - 1].pricePerToken !== undefined
-      ? Number(binData[binData.length - 1].pricePerToken)
-      : 0;
-  // Get current market price - use the fetched current market price if available
-  let currentPrice = 0;
 
-  // First, check if we have the actual current market price attached
-  if (pool.currentMarketPrice !== undefined) {
-    currentPrice = Number(pool.currentMarketPrice);
-  }
-  // Fallback: try to find active bin in position binData
-  else if (binData && binData.length > 0 && pool.activeId !== undefined) {
-    const activeBin = binData.find((b: BinData) => b.binId === pool.activeId);
-    if (activeBin && activeBin.pricePerToken !== undefined) {
-      currentPrice = Number(activeBin.pricePerToken);
-    } else {
-      // Final fallback: use middle of position range
-      const mid = Math.floor(binData.length / 2);
-      currentPrice =
-        binData[mid] && binData[mid].pricePerToken !== undefined
-          ? Number(binData[mid].pricePerToken)
-          : 0;
-    }
-  }
-  // Improved fallback for decimals
-  let xDecimals: number = 0;
-  if (typeof pos.tokenXDecimals === "number") xDecimals = pos.tokenXDecimals;
-  else if (typeof pool.tokenXDecimals === "number")
-    xDecimals = pool.tokenXDecimals;
-  else if (typeof positionInfo?.tokenX?.mint?.decimals === "number")
-    xDecimals = positionInfo.tokenX.mint.decimals;
-  else xDecimals = 0;
+  // Extract price data
+  const { minPrice, maxPrice } = extractPriceRange(binData);
+  const currentPrice = calculateCurrentPrice(pool, binData);
 
-  let yDecimals: number = 0;
-  if (typeof pos.tokenYDecimals === "number") yDecimals = pos.tokenYDecimals;
-  else if (typeof pool.tokenYDecimals === "number")
-    yDecimals = pool.tokenYDecimals;
-  else if (typeof positionInfo?.tokenY?.mint?.decimals === "number")
-    yDecimals = positionInfo.tokenY.mint.decimals;
-  else yDecimals = 0;
+  // Resolve decimals for both tokens
+  const xDecimals = resolveDecimals(
+    pos.tokenXDecimals,
+    pool.tokenXDecimals,
+    positionInfo,
+    'tokenX'
+  );
+  const yDecimals = resolveDecimals(
+    pos.tokenYDecimals,
+    pool.tokenYDecimals,
+    positionInfo,
+    'tokenY'
+  );
 
-  const xBalance = pos.positionData.totalXAmount
-    ? Number(pos.positionData.totalXAmount) / Math.pow(10, xDecimals)
+  // Calculate balances
+  const xBalance = calculateTokenAmount(pos.positionData.totalXAmount, xDecimals);
+  const yBalance = calculateTokenAmount(pos.positionData.totalYAmount, yDecimals);
+
+  // Calculate fees
+  const xFee = calculateTokenAmount(pos.positionData.feeX, xDecimals);
+  const yFee = calculateTokenAmount(pos.positionData.feeY, yDecimals);
+
+  // Calculate claimed fees
+  const claimedFeeX = calculateTokenAmount(pos.positionData.totalClaimedFeeXAmount, xDecimals);
+  const claimedFeeY = calculateTokenAmount(pos.positionData.totalClaimedFeeYAmount, yDecimals);
+
+  // Calculate USD values
+  const xPrice = Number(tokenXMeta?.usdPrice || 0);
+  const yPrice = Number(tokenYMeta?.usdPrice || 0);
+
+  const totalLiquidityUSD = tokenXMeta && tokenYMeta
+    ? calculateUSDValue(xBalance, xPrice, yBalance, yPrice)
     : 0;
-  const yBalance = pos.positionData.totalYAmount
-    ? Number(pos.positionData.totalYAmount) / Math.pow(10, yDecimals)
+
+  const claimedFeesUSD = tokenXMeta && tokenYMeta
+    ? calculateUSDValue(claimedFeeX, xPrice, claimedFeeY, yPrice)
     : 0;
-  const xFee = pos.positionData.feeX
-    ? Number(pos.positionData.feeX) / Math.pow(10, xDecimals)
-    : 0;
-  const yFee = pos.positionData.feeY
-    ? Number(pos.positionData.feeY) / Math.pow(10, yDecimals)
-    : 0;
-  const totalLiquidityUSD =
-    tokenXMeta && tokenYMeta
-      ? xBalance * Number(tokenXMeta.usdPrice || 0) +
-        yBalance * Number(tokenYMeta.usdPrice || 0)
-      : 0;
-  const claimedFeeX = pos.positionData.totalClaimedFeeXAmount
-    ? Number(pos.positionData.totalClaimedFeeXAmount) / Math.pow(10, xDecimals)
-    : 0;
-  const claimedFeeY = pos.positionData.totalClaimedFeeYAmount
-    ? Number(pos.positionData.totalClaimedFeeYAmount) / Math.pow(10, yDecimals)
-    : 0;
-  const claimedFeesUSD =
-    tokenXMeta && tokenYMeta
-      ? claimedFeeX * Number(tokenXMeta.usdPrice || 0) +
-        claimedFeeY * Number(tokenYMeta.usdPrice || 0)
-      : 0;
+
   return {
     minPrice,
     maxPrice,
@@ -731,7 +774,7 @@ const WalletPage = () => {
   const [activeTab, setActiveTab] = useState<"positions" | "link">("positions");
   const [pnlData, setPnlData] = useState<Map<string, PositionPnLResult>>(new Map());
   const [loadingPnl, setLoadingPnl] = useState(false);
-  const [loadingTier, setLoadingTier] = useState(false);
+  const [_loadingTier, setLoadingTier] = useState(false); // Reserved for future loading UI
   const [userTier, setUserTier] = useState<UserTierInfo | null>(null);
 
   // Check for tab query parameter
