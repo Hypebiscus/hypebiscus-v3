@@ -2,6 +2,7 @@
 import { Keypair, Connection, PublicKey, LAMPORTS_PER_SOL } from '@solana/web3.js';
 import { getAccount, getAssociatedTokenAddress, TOKEN_PROGRAM_ID } from '@solana/spl-token';
 import { EncryptionService } from '../utils/encryption';
+import { PrivateKeyParser } from '../utils/privateKeyParser';
 import * as db from './db';
 
 export class WalletService {
@@ -67,17 +68,26 @@ export class WalletService {
 
   /**
    * Import existing wallet and save to database
+   * Supports multiple formats: Base58, JSON array, hex, mnemonic, comma-separated
    */
-  async importWallet(userId: string, privateKeyJson: string): Promise<string | null> {
+  async importWallet(userId: string, privateKeyInput: string): Promise<{
+    publicKey: string;
+    format: string;
+  } | null> {
     try {
-      // Validate private key format
-      const secretKey = new Uint8Array(JSON.parse(privateKeyJson));
-      
-      if (secretKey.length !== 64) {
-        throw new Error('Invalid private key: must be 64 bytes');
+      // Parse private key from any supported format
+      const { secretKey, format } = PrivateKeyParser.parse(privateKeyInput);
+
+      // Validate secret key
+      if (!PrivateKeyParser.validateSecretKey(secretKey)) {
+        throw new Error('Invalid private key: failed validation');
       }
 
       const keypair = Keypair.fromSecretKey(secretKey);
+
+      // Convert to JSON array format for consistent storage
+      const privateKeyArray = Array.from(secretKey);
+      const privateKeyJson = JSON.stringify(privateKeyArray);
 
       // Encrypt private key
       const { encrypted, iv } = this.encryption.encrypt(privateKeyJson);
@@ -90,9 +100,12 @@ export class WalletService {
         iv
       );
 
-      console.log(`✅ Wallet imported and saved to DB for user ${userId}`);
+      console.log(`✅ Wallet imported (${format} format) and saved to DB for user ${userId}`);
 
-      return keypair.publicKey.toString();
+      return {
+        publicKey: keypair.publicKey.toString(),
+        format
+      };
     } catch (error) {
       console.error('Failed to import wallet:', error);
       return null;

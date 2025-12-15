@@ -3,6 +3,7 @@ import { Context, Telegraf } from 'telegraf';
 import { WalletService } from '../../services/walletService';
 import { getOrCreateUser } from '../../services/db';
 import { walletKeyboard, backKeyboard } from '../keyboards';
+import { PrivateKeyParser } from '../../utils/privateKeyParser';
 
 export class WalletHandler {
   constructor(
@@ -164,15 +165,15 @@ export class WalletHandler {
 
       await ctx.editMessageText(
         `📥 **Import Wallet**\n\n` +
-        `Send your private key as a JSON array:\n` +
-        `\`[1,2,3,4,...]\`\n\n` +
+        `Send your private key in ANY of these formats:\n\n` +
+        PrivateKeyParser.getFormatExamples() + `\n\n` +
         `⚠️ **IMPORTANT:**\n` +
         `• Make sure this chat is private!\n` +
         `• Delete the message after importing\n` +
         `• Only import your own wallet`,
-        { 
+        {
           parse_mode: 'Markdown',
-          ...backKeyboard 
+          ...backKeyboard
         }
       );
       
@@ -208,12 +209,13 @@ export class WalletHandler {
       }
 
       // Import wallet (automatically saves to database)
-      const publicKey = await this.walletService.importWallet(userId, privateKey);
-      
-      if (publicKey) {
+      const result = await this.walletService.importWallet(userId, privateKey);
+
+      if (result) {
         await ctx.reply(
           `✅ **Wallet Imported Successfully!**\n\n` +
-          `📍 Address:\n\`${publicKey}\`\n\n` +
+          `📍 Address:\n\`${result.publicKey}\`\n\n` +
+          `✨ Format detected: **${result.format}**\n\n` +
           `💡 Your wallet is now ready to use!`,
           { parse_mode: 'Markdown' }
         );
@@ -225,11 +227,11 @@ export class WalletHandler {
           console.log('Could not delete message (might be too old)');
         }
 
-        console.log(`✅ Wallet imported for user ${telegramId}: ${publicKey}`);
+        console.log(`✅ Wallet imported (${result.format}) for user ${telegramId}: ${result.publicKey}`);
       } else {
         await ctx.reply(
-          '❌ Invalid private key format.\n\n' +
-          'Please send the private key as a JSON array: `[1,2,3,4,...]`',
+          '❌ **Invalid private key format.**\n\n' +
+          PrivateKeyParser.getFormatExamples(),
           { parse_mode: 'Markdown' }
         );
       }
