@@ -405,3 +405,20 @@ model reposition_notifications {
   @@index([walletAddress, createdAt(sort: Desc)], map: "idx_wallet_notifications")
   @@index([positionId], map: "idx_position_notifications")
 }
+
+/// Telegram notifications queue for bot to poll and send
+model telegram_notifications {
+  id            String    @id @default(dbgenerated("gen_random_uuid()"))
+  telegramId    BigInt    @map("telegram_id") // Telegram user ID
+  message       String    @map("message") // Message text to send
+  type          String    @map("type") // 'reposition_success', 'reposition_failed', 'info', 'warning', 'error'
+  metadata      String?   @map("metadata") // JSON string with additional data (transaction links, etc.)
+  sent          Boolean   @default(false) @map("sent") // Whether message has been sent
+  sentAt        DateTime? @map("sent_at") // When message was sent
+  error         String?   @map("error") // Error message if sending failed
+  retryCount    Int       @default(0) @map("retry_count") // Number of retry attempts
+  createdAt     DateTime  @default(now()) @map("created_at")
+
+  @@index([telegramId, sent, createdAt(sort: Desc)], map: "idx_telegram_notifications_pending")
+  @@index([sent, createdAt(sort: Asc)], map: "idx_telegram_notifications_queue")
+}

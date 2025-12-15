@@ -354,7 +354,13 @@ export class AutoRepositionWorker {
       // 7. Send success notification
       await this.sendTelegramNotification(
         settings.userId,
-        `✅ Position auto-repositioned!\n\nPosition: ${positionId.slice(0, 8)}...\nTransaction: ${signature.slice(0, 8)}...\n\nView on Solscan: https://solscan.io/tx/${signature}`
+        `✅ Position auto-repositioned!\n\nPosition: ${positionId.slice(0, 8)}...\nTransaction: ${signature.slice(0, 8)}...\n\nView on Solscan: https://solscan.io/tx/${signature}`,
+        'reposition_success',
+        {
+          positionId,
+          transactionSignature: signature,
+          solscanUrl: `https://solscan.io/tx/${signature}`,
+        }
       );
 
       logger.info(`🎉 Auto-reposition complete for position ${positionId.slice(0, 8)}...`);
@@ -365,7 +371,12 @@ export class AutoRepositionWorker {
       // Send error notification
       await this.sendTelegramNotification(
         settings.userId,
-        `❌ Auto-reposition failed for position ${positionId.slice(0, 8)}...\n\nError: ${error instanceof Error ? error.message : 'Unknown error'}`
+        `❌ Auto-reposition failed for position ${positionId.slice(0, 8)}...\n\nError: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        'reposition_failed',
+        {
+          positionId,
+          errorMessage: error instanceof Error ? error.message : 'Unknown error',
+        }
       );
 
       return false;
@@ -402,9 +413,15 @@ export class AutoRepositionWorker {
   }
 
   /**
-   * Send Telegram notification
+   * Send Telegram notification by queuing in database
+   * The Telegram bot polls telegram_notifications table and sends messages
    */
-  private async sendTelegramNotification(userId: string, message: string): Promise<void> {
+  private async sendTelegramNotification(
+    userId: string,
+    message: string,
+    type: 'reposition_success' | 'reposition_failed' | 'info' | 'warning' | 'error' = 'info',
+    metadata?: Record<string, any>
+  ): Promise<void> {
     try {
       const prisma = database.getClient();
 
@@ -419,16 +436,21 @@ export class AutoRepositionWorker {
         return;
       }
 
-      // TODO: Call Telegram bot API to send message
-      // For now, just log (implement webhook to Telegram bot later)
-      logger.info(`📱 Telegram notification for user ${user.telegramId}: ${message}`);
+      // Queue notification in database for Telegram bot to pick up
+      await prisma.telegram_notifications.create({
+        data: {
+          telegramId: user.telegramId,
+          message,
+          type,
+          metadata: metadata ? JSON.stringify(metadata) : null,
+          sent: false,
+          createdAt: new Date(),
+        },
+      });
 
-      // You can implement this by:
-      // 1. HTTP request to Telegram bot webhook
-      // 2. Queue message in database for bot to pick up
-      // 3. Direct Telegram API call if bot token available
+      logger.info(`📱 Queued Telegram notification for user ${user.telegramId} (type: ${type})`);
     } catch (error) {
-      logger.error('Failed to send Telegram notification:', error);
+      logger.error('Failed to queue Telegram notification:', error);
     }
   }
 }
