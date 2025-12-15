@@ -176,12 +176,12 @@ export class WalletHandler {
           ...backKeyboard
         }
       );
-      
+
       // Set state to expect private key input
-      (ctx as any).session = { 
-        waitingForPrivateKey: true,
-        userId: user.id 
-      };
+      // Update session properties (don't replace the object)
+      const session = (ctx as any).session;
+      session.waitingForPrivateKey = true;
+      session.userId = user.id;
     } catch (error) {
       console.error('Error in import wallet:', error);
       await ctx.editMessageText(
