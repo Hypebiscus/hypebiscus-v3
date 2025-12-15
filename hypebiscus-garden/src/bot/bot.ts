@@ -34,6 +34,7 @@ import {
 } from './handlers/walletDeletion';
 import { mainKeyboard, backKeyboard } from './keyboards';
 import { getOrCreateUser } from '../services/db';
+import { safeLogUserInput } from '../utils/secureLogging';
 
 export class TelegramBot {
   private bot: Telegraf;
@@ -352,9 +353,11 @@ export class TelegramBot {
       const text = ctx.text;
       const userId = ctx.from?.id;
       if (!userId) return;
-      
+
       const session = this.sessions.get(userId) || {};
-      console.log(`📝 Text received from user ${userId}: "${text}"`);
+
+      // Safely log user input (censors private keys automatically)
+      safeLogUserInput(userId, text);
       console.log(`🔍 Session state:`, session);
 
       if (session.waitingForPrivateKey) {
