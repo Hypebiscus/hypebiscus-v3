@@ -67,12 +67,22 @@ export async function createWallet(
   encrypted: string,
   iv: string
 ) {
+  // Check if this user already has a wallet
   const existing = await prisma.wallet.findUnique({
     where: { userId }
   });
 
   if (existing) {
     throw new Error('User already has a wallet');
+  }
+
+  // Check if this public key is already used by another user
+  const existingPublicKey = await prisma.wallet.findUnique({
+    where: { publicKey }
+  });
+
+  if (existingPublicKey) {
+    throw new Error('This wallet is already imported by another account');
   }
 
   return prisma.wallet.create({

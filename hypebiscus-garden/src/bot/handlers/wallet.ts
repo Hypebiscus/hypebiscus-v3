@@ -237,9 +237,19 @@ export class WalletHandler {
       }
     } catch (error: any) {
       console.error('Error importing wallet:', error);
-      
+
       if (error.message === 'User already has a wallet') {
         await ctx.reply('⚠️ You already have a wallet!');
+      } else if (error.message === 'This wallet is already imported by another account') {
+        await ctx.reply(
+          '⚠️ **Wallet Already In Use**\n\n' +
+          'This wallet is already imported by another Telegram account.\n\n' +
+          '**Options:**\n' +
+          '• Use a different wallet\n' +
+          '• Delete the wallet from the other account first\n' +
+          '• Create a new wallet with /start',
+          { parse_mode: 'Markdown' }
+        );
       } else {
         await ctx.reply('❌ Failed to import wallet. Please check the format and try again.');
       }
