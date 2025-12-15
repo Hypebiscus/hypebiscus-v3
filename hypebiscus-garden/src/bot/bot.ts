@@ -32,7 +32,7 @@ import {
   handleDeleteWalletConfirmation,
   handleCancelDeletion
 } from './handlers/walletDeletion';
-import { mainKeyboard, backKeyboard } from './keyboards';
+import { mainKeyboard, backKeyboard, helpKeyboard } from './keyboards';
 import { getOrCreateUser } from '../services/db';
 import { safeLogUserInput } from '../utils/secureLogging';
 
@@ -133,37 +133,9 @@ export class TelegramBot {
 
     this.bot.help((ctx) => {
       ctx.reply(
-        `🤖 **ZBTC-SOL DLMM Bot Commands**\n\n` +
-        `**General:**\n` +
-        `/start - Start the bot\n` +
-        `/help - Show this help message\n` +
-        `/status - Show monitoring status\n` +
-        `/balance - Check wallet balance\n\n` +
-        `**Wallet Linking:**\n` +
-        `/link <CODE> - Link website wallet\n` +
-        `/linked - Check link status\n` +
-        `/unlink - Unlink wallet\n\n` +
-        `**Wallet Deletion:**\n` +
-        `/deletewallet - Delete wallet data (PERMANENT)\n` +
-        `/confirmdeletewallet - Confirm deletion\n` +
-        `/cancel - Cancel deletion process\n\n` +
-        `**Auto-Reposition:**\n` +
-        `/settings - View/edit settings\n` +
-        `/enableauto - Enable auto-repositioning\n` +
-        `/disableauto - Disable auto-repositioning\n\n` +
-        `**Payment:**\n` +
-        `/credits - Check credit balance\n` +
-        `/topup - Purchase credits\n` +
-        `/subscribe - Subscribe to premium\n\n` +
-        `**Features:**\n` +
-        `• Create/Import Solana wallets\n` +
-        `• Link with website for cross-platform sync\n` +
-        `• Auto-manage ZBTC-SOL positions\n` +
-        `• 24/7 monitoring & repositioning\n` +
-        `• Pay-per-use or subscription models\n` +
-        `• Real-time notifications\n\n` +
-        `Use the buttons below to navigate!`,
-        { parse_mode: 'Markdown', ...mainKeyboard }
+        `🤖 **ZBTC-SOL DLMM Bot Help**\n\n` +
+        `Choose a category to see available commands:`,
+        { parse_mode: 'Markdown', ...helpKeyboard }
       );
     });
 
@@ -347,6 +319,99 @@ export class TelegramBot {
         console.error('Error deleting message:', error);
         await ctx.answerCbQuery('❌ Failed to delete message');
       }
+    });
+
+    // Help category handlers
+    this.bot.action('help_wallet', (ctx) => {
+      ctx.editMessageText(
+        `👛 **Wallet Commands**\n\n` +
+        `**/balance** - Check wallet balance\n` +
+        `**Wallet Info** button - View wallet details\n` +
+        `**Create Wallet** - Generate new wallet\n` +
+        `**Import Wallet** - Import existing wallet\n` +
+        `**Export Key** - Export private key\n\n` +
+        `💡 Supports 5 import formats:\n` +
+        `• Base58 (Phantom/Solflare)\n` +
+        `• JSON array\n` +
+        `• Hex (with/without 0x)\n` +
+        `• Mnemonic (12/24 words)\n` +
+        `• Comma-separated numbers`,
+        { parse_mode: 'Markdown', ...helpKeyboard }
+      );
+    });
+
+    this.bot.action('help_positions', (ctx) => {
+      ctx.editMessageText(
+        `💼 **Position Commands**\n\n` +
+        `**Create Position** - Open new DLMM position\n` +
+        `**View Positions** - See active positions\n` +
+        `**Close Position** - Close a position\n` +
+        `**Position History** - View past positions\n` +
+        `**/status** - Show bot & pool status\n\n` +
+        `📊 Features:\n` +
+        `• Real-time position tracking\n` +
+        `• PnL calculation\n` +
+        `• Fee earnings monitoring\n` +
+        `• Historical performance`,
+        { parse_mode: 'Markdown', ...helpKeyboard }
+      );
+    });
+
+    this.bot.action('help_settings', (ctx) => {
+      ctx.editMessageText(
+        `⚙️ **Settings & Auto-Reposition**\n\n` +
+        `**/settings** - View/edit all settings\n` +
+        `**/enableauto** - Enable auto-repositioning\n` +
+        `**/disableauto** - Disable auto-repositioning\n` +
+        `**Reposition** button - Toggle monitoring\n\n` +
+        `🤖 Auto-Reposition Features:\n` +
+        `• 24/7 position monitoring\n` +
+        `• Automatic out-of-range detection\n` +
+        `• Smart repositioning\n` +
+        `• Real-time notifications\n\n` +
+        `⚠️ Requires imported wallet with private key`,
+        { parse_mode: 'Markdown', ...helpKeyboard }
+      );
+    });
+
+    this.bot.action('help_payment', (ctx) => {
+      ctx.editMessageText(
+        `💳 **Payment & Credits**\n\n` +
+        `**/credits** - Check credit balance\n` +
+        `**/topup** - Purchase credits\n` +
+        `**/subscribe** - Subscribe to premium\n\n` +
+        `💰 Payment Options:\n` +
+        `• Pay-per-use (credits)\n` +
+        `• Monthly subscription\n` +
+        `• Premium features access\n\n` +
+        `🎁 Benefits:\n` +
+        `• Unlimited auto-repositions\n` +
+        `• Priority support\n` +
+        `• Advanced analytics`,
+        { parse_mode: 'Markdown', ...helpKeyboard }
+      );
+    });
+
+    this.bot.action('help_linking', (ctx) => {
+      ctx.editMessageText(
+        `🔗 **Wallet Linking**\n\n` +
+        `**/link <CODE>** - Link website wallet\n` +
+        `**/linked** - Check link status\n` +
+        `**/unlink** - Unlink wallet\n\n` +
+        `🌐 How It Works:\n` +
+        `1. Connect wallet on website\n` +
+        `2. Scan QR code or use link code\n` +
+        `3. Get notifications in Telegram\n\n` +
+        `🚀 Upgrade to Full Access:\n` +
+        `• Import same wallet's private key\n` +
+        `• Enables auto-repositioning\n` +
+        `• Same wallet everywhere\n\n` +
+        `**Wallet Deletion:**\n` +
+        `**/deletewallet** - Delete wallet (PERMANENT)\n` +
+        `**/confirmdeletewallet** - Confirm deletion\n` +
+        `**/cancel** - Cancel deletion`,
+        { parse_mode: 'Markdown', ...helpKeyboard }
+      );
     });
 
     this.bot.on('text', async (ctx) => {
