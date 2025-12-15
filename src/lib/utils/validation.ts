@@ -151,13 +151,47 @@ export interface MCPRequestBody {
   id: number | string
 }
 
-export function validateMCPRequest(body: unknown): { isValid: boolean; error?: string } {
-  if (!body || typeof body !== 'object') {
-    return { isValid: false, error: 'Invalid request body' };
-  }
+// List of available MCP tools
+// IMPORTANT: This list must match the tools registered in hypebiscus-mcp/src/index.ts
+const AVAILABLE_MCP_TOOLS = [
+  'get_pool_metrics',
+  'get_user_by_wallet',
+  'get_user_positions',
+  'get_wallet_performance',
+  'get_position_details',
+  'get_dlmm_position',
+  'get_bin_distribution',
+  'calculate_rebalance',
+  'get_user_positions_with_sync',
+  'generate_wallet_link_token',
+  'link_wallet_by_short_token',
+  'link_wallet',
+  'get_linked_account',
+  'unlink_wallet',
+  'delete_wallet_completely',
+  'check_subscription',
+  'get_credit_balance',
+  'purchase_credits',
+  'use_credits',
+  'record_execution',
+  'get_reposition_settings',
+  'update_reposition_settings',
+  'analyze_reposition',
+  'prepare_reposition',
+  'get_position_chain',
+  'get_wallet_reposition_stats',
+  'calculate_position_pnl',
+  'close_position',
+  'get_wallet_pnl',
+  'sync_wallet_positions'
+] as const;
 
-  const req = body as Record<string, unknown>;
+const ALLOWED_MCP_METHODS = ['tools/list', 'tools/call'] as const;
 
+/**
+ * Validate JSON-RPC structure (version, method, id)
+ */
+function validateJSONRPCStructure(req: Record<string, unknown>): { isValid: boolean; error?: string } {
   // Validate JSON-RPC version
   if (req.jsonrpc !== '2.0') {
     return { isValid: false, error: 'Invalid JSON-RPC version. Must be "2.0"' };
@@ -168,10 +202,8 @@ export function validateMCPRequest(body: unknown): { isValid: boolean; error?: s
     return { isValid: false, error: 'Method must be a non-empty string' };
   }
 
-  // Validate allowed methods
-  const allowedMethods = ['tools/list', 'tools/call'];
-  if (!allowedMethods.includes(req.method)) {
-    return { isValid: false, error: `Method must be one of: ${allowedMethods.join(', ')}` };
+  if (!ALLOWED_MCP_METHODS.includes(req.method as typeof ALLOWED_MCP_METHODS[number])) {
+    return { isValid: false, error: `Method must be one of: ${ALLOWED_MCP_METHODS.join(', ')}` };
   }
 
   // Validate id
@@ -179,72 +211,87 @@ export function validateMCPRequest(body: unknown): { isValid: boolean; error?: s
     return { isValid: false, error: 'ID must be a number or string' };
   }
 
+  return { isValid: true };
+}
+
+/**
+ * Validate tool name against available tools
+ */
+function validateToolName(name: string): { isValid: boolean; error?: string } {
+  if (!AVAILABLE_MCP_TOOLS.includes(name as typeof AVAILABLE_MCP_TOOLS[number])) {
+    return {
+      isValid: false,
+      error: `Unknown tool: ${name}. Available tools: ${AVAILABLE_MCP_TOOLS.join(', ')}`
+    };
+  }
+  return { isValid: true };
+}
+
+/**
+ * Validate tool arguments structure and size
+ */
+function validateToolArguments(args: unknown): { isValid: boolean; error?: string } {
+  if (args === undefined) {
+    return { isValid: true };
+  }
+
+  if (typeof args !== 'object' || args === null) {
+    return { isValid: false, error: 'Arguments must be an object' };
+  }
+
+  // Check serialized size (max 10KB)
+  const argsString = JSON.stringify(args);
+  if (argsString.length > 10000) {
+    return { isValid: false, error: 'Arguments too large. Maximum 10KB allowed' };
+  }
+
+  return { isValid: true };
+}
+
+/**
+ * Validate params for tools/call method
+ */
+function validateToolsCallParams(params: unknown): { isValid: boolean; error?: string } {
+  if (!params || typeof params !== 'object') {
+    return { isValid: false, error: 'Params required for tools/call method' };
+  }
+
+  const p = params as Record<string, unknown>;
+
+  if (typeof p.name !== 'string' || p.name.length === 0) {
+    return { isValid: false, error: 'Tool name required and must be a non-empty string' };
+  }
+
+  // Validate tool name exists
+  const toolNameResult = validateToolName(p.name);
+  if (!toolNameResult.isValid) {
+    return toolNameResult;
+  }
+
+  // Validate arguments if provided
+  return validateToolArguments(p.arguments);
+}
+
+/**
+ * Main MCP request validation function
+ * Validates JSON-RPC structure and tool-specific parameters
+ */
+export function validateMCPRequest(body: unknown): { isValid: boolean; error?: string } {
+  if (!body || typeof body !== 'object') {
+    return { isValid: false, error: 'Invalid request body' };
+  }
+
+  const req = body as Record<string, unknown>;
+
+  // Validate JSON-RPC structure
+  const structureResult = validateJSONRPCStructure(req);
+  if (!structureResult.isValid) {
+    return structureResult;
+  }
+
   // Validate params for tools/call method
   if (req.method === 'tools/call') {
-    if (!req.params || typeof req.params !== 'object') {
-      return { isValid: false, error: 'Params required for tools/call method' };
-    }
-
-    const params = req.params as Record<string, unknown>;
-
-    if (typeof params.name !== 'string' || params.name.length === 0) {
-      return { isValid: false, error: 'Tool name required and must be a non-empty string' };
-    }
-
-    // Validate tool name is one of the available tools
-    // IMPORTANT: This list must match the tools registered in hypebiscus-mcp/src/index.ts
-    const availableTools = [
-      'get_pool_metrics',
-      'get_user_by_wallet',
-      'get_user_positions',
-      'get_wallet_performance',
-      'get_position_details',
-      'get_dlmm_position',
-      'get_bin_distribution',
-      'calculate_rebalance',
-      'get_user_positions_with_sync',
-      'generate_wallet_link_token',
-      'link_wallet_by_short_token',
-      'link_wallet',
-      'get_linked_account',
-      'unlink_wallet',
-      'delete_wallet_completely',
-      'check_subscription',
-      'get_credit_balance',
-      'purchase_credits',
-      'use_credits',
-      'record_execution',
-      'get_reposition_settings',
-      'update_reposition_settings',
-      'analyze_reposition',
-      'prepare_reposition',
-      'get_position_chain',
-      'get_wallet_reposition_stats',
-      'calculate_position_pnl',
-      'close_position',
-      'get_wallet_pnl',
-      'sync_wallet_positions'
-    ];
-
-    if (!availableTools.includes(params.name)) {
-      return {
-        isValid: false,
-        error: `Unknown tool: ${params.name}. Available tools: ${availableTools.join(', ')}`
-      };
-    }
-
-    // Validate arguments if provided
-    if (params.arguments !== undefined) {
-      if (typeof params.arguments !== 'object' || params.arguments === null) {
-        return { isValid: false, error: 'Arguments must be an object' };
-      }
-
-      // Check serialized size
-      const argsString = JSON.stringify(params.arguments);
-      if (argsString.length > 10000) {
-        return { isValid: false, error: 'Arguments too large. Maximum 10KB allowed' };
-      }
-    }
+    return validateToolsCallParams(req.params);
   }
 
   return { isValid: true };
