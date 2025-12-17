@@ -172,7 +172,9 @@ export class TelegramBotWebhook {
 
       // Configure webhook
       const webhookPath = `/telegram-webhook/${process.env.TELEGRAM_BOT_TOKEN}`;
-      const webhookUrl = `${this.webhookDomain}${webhookPath}`;
+      // Remove trailing slash from webhookDomain if present
+      const cleanDomain = this.webhookDomain.replace(/\/$/, '');
+      const webhookUrl = `${cleanDomain}${webhookPath}`;
 
       console.log(`🌐 Setting up webhook: ${webhookUrl}`);
 
