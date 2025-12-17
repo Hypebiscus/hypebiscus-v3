@@ -171,7 +171,7 @@ export class TelegramBotPollingImproved {
       clearTimeout(timeoutId);
 
       if (response.ok) {
-        const data = await response.json();
+        const data = await response.json() as { result: { username: string } };
         console.log(`✅ Connection test successful: @${data.result.username}`);
         return true;
       } else {

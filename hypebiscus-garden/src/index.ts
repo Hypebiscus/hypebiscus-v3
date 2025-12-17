@@ -63,7 +63,9 @@ async function main() {
   console.log('🤖 Initializing Telegram bot...');
   const bot = new TelegramBot(
     process.env.TELEGRAM_BOT_TOKEN!,
-    process.env.SOLANA_RPC_URL!
+    process.env.SOLANA_RPC_URL!,
+    process.env.WEBHOOK_DOMAIN!,
+    parseInt(process.env.PORT || '10000', 10)
   );
 
   await bot.start();
