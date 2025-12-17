@@ -2,8 +2,8 @@
 # https://render.com/docs/blueprint-spec
 
 services:
-  # Telegram Bot Web Service (Webhook Mode)
-  - type: web
+  # Telegram Bot Background Worker (Improved Polling Mode)
+  - type: worker
     name: hypebiscus-garden-bot
     runtime: node
     plan: starter
@@ -17,10 +17,6 @@ services:
       # Public configuration
       - key: NODE_ENV
         value: production
-
-      # Webhook Configuration
-      - key: PORT
-        value: 10000
 
       # Monitoring Configuration
       - key: MONITORING_INTERVAL_MS
@@ -40,7 +36,6 @@ services:
       # - ENCRYPTION_KEY (64-char hex string for wallet encryption)
       # - WALLET_LINK_SECRET (64-char hex string for HMAC - MUST match MCP server)
       # - MCP_SERVER_URL (hypebiscus-mcp service URL after deployment)
-      # - WEBHOOK_DOMAIN (your Render service URL, e.g., https://hypebiscus-garden-bot.onrender.com)
 
 # Important Notes:
 # 1. DO NOT add secrets to this file
@@ -48,6 +43,5 @@ services:
 # 3. WALLET_LINK_SECRET must match the one used in hypebiscus-mcp
 # 4. MCP_SERVER_URL should be set to the deployed MCP service URL
 #    (e.g., https://hypebiscus-mcp.onrender.com)
-# 5. WEBHOOK_DOMAIN must be set to this service's URL (get from Render Dashboard)
-# 6. This runs as a web service on port 10000 (webhook mode)
-# 7. Monitor logs via Render Dashboard to ensure bot is running
+# 5. This runs as a background worker (improved polling mode)
+# 6. Monitor logs via Render Dashboard to ensure bot is running
