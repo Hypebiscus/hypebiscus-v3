@@ -4,7 +4,7 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 // NOW import everything else
-import { TelegramBotWebhook as TelegramBot } from './bot/bot-webhook';
+import { TelegramBotPollingImproved as TelegramBot } from './bot/bot-polling-improved';
 import { prisma } from './services/db';
 
 // Validate required environment variables
@@ -14,9 +14,7 @@ const requiredEnvVars = [
   'ZBTC_SOL_POOL_ADDRESS',
   'ZBTC_MINT_ADDRESS',
   'DATABASE_URL',
-  'ENCRYPTION_KEY',
-  'PORT',
-  'WEBHOOK_DOMAIN'
+  'ENCRYPTION_KEY'
 ];
 
 console.log('🔍 Checking environment variables...');
@@ -30,8 +28,6 @@ for (const envVar of requiredEnvVars) {
     console.error(`   ZBTC_MINT_ADDRESS: ${process.env.ZBTC_MINT_ADDRESS ? '✅ Set' : '❌ Missing'}`);
     console.error(`   DATABASE_URL: ${process.env.DATABASE_URL ? '✅ Set' : '❌ Missing'}`);
     console.error(`   ENCRYPTION_KEY: ${process.env.ENCRYPTION_KEY ? '✅ Set' : '❌ Missing'}`);
-    console.error(`   PORT: ${process.env.PORT ? '✅ Set' : '❌ Missing'}`);
-    console.error(`   WEBHOOK_DOMAIN: ${process.env.WEBHOOK_DOMAIN ? '✅ Set' : '❌ Missing'}`);
     process.exit(1);
   }
 }
@@ -63,9 +59,7 @@ async function main() {
   console.log('🤖 Initializing Telegram bot...');
   const bot = new TelegramBot(
     process.env.TELEGRAM_BOT_TOKEN!,
-    process.env.SOLANA_RPC_URL!,
-    process.env.WEBHOOK_DOMAIN!,
-    parseInt(process.env.PORT || '10000', 10)
+    process.env.SOLANA_RPC_URL!
   );
 
   await bot.start();
