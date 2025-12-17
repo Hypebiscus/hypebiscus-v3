@@ -12,8 +12,8 @@
  * 5. Server verifies payment via facilitator, returns content
  */
 
-import { createX402Client } from '@payai/x402-solana/client';
-import type { WalletAdapter } from '@payai/x402-solana/client';
+import { createX402Client } from 'x402-solana/client';
+import type { WalletAdapter } from 'x402-solana/client';
 import { PublicKey, Transaction, VersionedTransaction } from '@solana/web3.js';
 
 // Network configuration

@@ -22,8 +22,8 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { X402PaymentHandler } from '@payai/x402-solana/server';
-import type { PaymentRequirements } from '@payai/x402-solana/server';
+import { X402PaymentHandler } from 'x402-solana/server';
+import type { PaymentRequirements } from 'x402-solana/server';
 
 // USDC mint addresses (6 decimals)
 const USDC_MAINNET = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
