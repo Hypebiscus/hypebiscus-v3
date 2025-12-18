@@ -3,12 +3,15 @@
 import { Alert, AlertTitle, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Bot, ArrowRight, Zap, Bell } from "lucide-react";
+import { useRouter } from "next/navigation";
 
 interface AutoRepositionAlertProps {
   show: boolean;
 }
 
 export function AutoRepositionAlert({ show }: AutoRepositionAlertProps) {
+  const router = useRouter();
+
   if (!show) return null;
 
   return (
@@ -47,22 +50,20 @@ export function AutoRepositionAlert({ show }: AutoRepositionAlertProps) {
 
         <div className="flex flex-col sm:flex-row gap-3 mt-4">
           <Button
-            onClick={() => window.open("https://t.me/YourBotUsername", "_blank")}
+            onClick={() => router.push("/link")}
             className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white"
           >
             <Bot className="h-4 w-4" />
-            Use Telegram for Full Automation
+            Link Wallet to Telegram
             <ArrowRight className="h-4 w-4" />
           </Button>
 
           <Button
             variant="outline"
-            onClick={() => {
-              // Could link to settings page or docs
-            }}
+            onClick={() => window.open("https://t.me/hypebiscus_garden_bot", "_blank")}
             className="text-blue-700 dark:text-blue-300 border-blue-300 dark:border-blue-700"
           >
-            Learn More
+            Open Telegram Bot
           </Button>
         </div>
 
