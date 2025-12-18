@@ -2,7 +2,7 @@
 "use client"
 
 import { Button } from "@/components/ui/button"
-import { HouseIcon, WalletIcon, LightningIcon } from "@phosphor-icons/react"
+import { HouseIcon, WalletIcon, LightningIcon, LinkIcon, CreditCardIcon } from "@phosphor-icons/react"
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 
@@ -16,7 +16,7 @@ const Menu = () => {
     },
     {
       label: "Pricing",
-      emoji: "💳",
+      icon: CreditCardIcon,
       path: "/pricing",
     },
     {
@@ -28,6 +28,11 @@ const Menu = () => {
       label: "Wallet",
       icon: WalletIcon,
       path: "/wallet",
+    },
+    {
+      label: "Link",
+      icon: LinkIcon,
+      path: "/link",
     },
   ]
 
@@ -41,16 +46,12 @@ const Menu = () => {
 
             return (
               <Link href={item.path} key={index}>
-                <Button 
-                  variant={isActive ? "default" : "ghost"} 
-                  className={`relative rounded-2xl w-[32px] h-[32px] ${isActive ? 'bg-primary text-white' : 'hover:bg-primary/20 hover:text-white'}`} 
+                <Button
+                  variant={isActive ? "default" : "ghost"}
+                  className={`relative rounded-2xl w-[32px] h-[32px] ${isActive ? 'bg-primary text-white' : 'hover:bg-primary/20 hover:text-white'}`}
                   title={item.label}
                 >
-                  {item.emoji ? (
-                    <span className="text-lg">{item.emoji}</span>
-                  ) : Icon ? (
-                    <Icon />
-                  ) : null}
+                  <Icon />
                 </Button>
               </Link>
             )

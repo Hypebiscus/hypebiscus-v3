@@ -1,6 +1,10 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import { useWallet } from '@solana/wallet-adapter-react';
 import { mcpClient } from '@/lib/services/mcpClient';
+
+// Cache for payment status (30 second TTL)
+const paymentStatusCache = new Map<string, { data: PaymentStatus; timestamp: number }>();
+const CACHE_TTL = 30000; // 30 seconds
 
 interface PaymentStatus {
   hasAccess: boolean;
@@ -42,10 +46,19 @@ export function usePaymentVerification() {
       return emptyStatus;
     }
 
+    const walletAddress = publicKey.toBase58();
+
+    // Check cache first
+    const cached = paymentStatusCache.get(walletAddress);
+    if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
+      console.log('💾 Using cached payment status');
+      setStatus(cached.data);
+      return cached.data;
+    }
+
     setStatus(prev => ({ ...prev, loading: true, error: null }));
 
     try {
-      const walletAddress = publicKey.toBase58();
 
       // Check subscription status
       // mcpClient.callTool() already parses the response
@@ -74,6 +87,12 @@ export function usePaymentVerification() {
         loading: false,
         error: null,
       };
+
+      // Cache the result
+      paymentStatusCache.set(walletAddress, {
+        data: newStatus,
+        timestamp: Date.now(),
+      });
 
       setStatus(newStatus);
       return newStatus;

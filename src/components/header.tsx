@@ -13,9 +13,11 @@ import {
 } from "@/components/ui/navigation-menu";
 import {
   HouseIcon,
-  LightningAIcon,
+  LightningIcon,
   WalletIcon,
   ListIcon,
+  LinkIcon,
+  CreditCardIcon,
 } from "@phosphor-icons/react";
 import Link from "next/link";
 import Image from "next/image";
@@ -70,15 +72,15 @@ const Header = () => {
                   </li>
                   <li>
                     <NavigationMenuLink asChild>
-                      <Link href="/premium">
-                        <span className="text-primary text-xl">🤖</span> Premium
+                      <Link href="/pricing">
+                        <CreditCardIcon className="text-primary" /> Pricing
                       </Link>
                     </NavigationMenuLink>
                   </li>
                   <li>
                     <NavigationMenuLink asChild>
-                      <Link href="/mcp">
-                        <span className="text-primary text-xl">📡</span> MCP
+                      <Link href="/bridge">
+                        <LightningIcon className="text-primary" /> Bridge
                       </Link>
                     </NavigationMenuLink>
                   </li>
@@ -91,8 +93,8 @@ const Header = () => {
                   </li>
                   <li>
                     <NavigationMenuLink asChild>
-                      <Link href="/bridge">
-                        <LightningAIcon className="text-primary" /> Bridge
+                      <Link href="/link">
+                        <LinkIcon className="text-primary" /> Link
                       </Link>
                     </NavigationMenuLink>
                   </li>

@@ -57,7 +57,7 @@ class RateLimiter {
 
 // Create rate limiter instances
 export const chatRateLimiter = new RateLimiter(60000, 10) // 10 requests per minute
-export const globalRateLimiter = new RateLimiter(60000, 30) // 30 requests per minute
+export const globalRateLimiter = new RateLimiter(60000, 100) // 100 requests per minute (increased for wallet page PnL fetching)
 
 // Cleanup expired entries every 5 minutes
 setInterval(() => {
