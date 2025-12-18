@@ -5,6 +5,9 @@ import type { PositionInfoType, PoolWithActiveId } from './useWalletPositions';
 import type { MaybeBase58 } from './useFilteredPositions';
 import { fetchTokenMeta } from './useFilteredPositions';
 
+// Helper to delay between API calls
+const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
 interface PositionType {
   publicKey: PublicKey;
   positionData: {
@@ -96,12 +99,19 @@ export function usePnLData(
           console.warn(`⚠️ Position sync failed:`, syncError);
         }
 
-        // Calculate PnL for each position
+        // Calculate PnL for each position (with delay to avoid rate limiting)
+        let positionIndex = 0;
         for (const [, positionInfo] of positionsMap.entries()) {
           const positions = positionInfo.lbPairPositionsData as PositionType[];
 
           for (const pos of positions) {
             const positionId = pos.publicKey.toBase58();
+
+            // Add 300ms delay between position calculations (except first one)
+            if (positionIndex > 0) {
+              await delay(300);
+            }
+            positionIndex++;
 
             try {
               const pnl = await mcpClient.calculatePositionPnL({

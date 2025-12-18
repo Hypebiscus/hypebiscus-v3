@@ -41,14 +41,11 @@ import type { PositionInfoType, PoolWithActiveId } from "./hooks/useWalletPositi
 
 // Components
 import { PortfolioSummary } from "./components/PortfolioSummary";
-import { TabNavigation } from "./components/TabNavigation";
 import { ViewToggle } from "./components/ViewToggle";
 import { PositionsList } from "./components/PositionsList";
-import { TelegramLinkTab } from "./components/TelegramLinkTab";
 import { ErrorMessage } from "./components/ErrorMessage";
 import { SyncPositionsButton } from "./components/SyncPositionsButton";
 import { CreditGateAlert } from "./components/CreditGateAlert";
-import { AutoRepositionAlert } from "./components/AutoRepositionAlert";
 import {
   NoPositionsState,
   WalletNotConnectedState,
@@ -711,7 +708,6 @@ const WalletPage = () => {
   const [viewMode, setViewMode] = useState<"table" | "card">(
     typeof window !== "undefined" && window.innerWidth < 640 ? "card" : "table"
   );
-  const [activeTab, setActiveTab] = useState<"positions" | "link">("positions");
 
   // Custom hooks for state management
   const { positions, loading, error, refreshPositions } = useWalletPositions(
@@ -721,17 +717,6 @@ const WalletPage = () => {
   const filteredPositions = useFilteredPositions(positions);
   const { pnlData, loadingPnl, updatePnL } = usePnLData(publicKey, filteredPositions);
   const { userTier } = useUserTier(publicKey, connected);
-
-  // Check for tab query parameter
-  useEffect(() => {
-    if (typeof window !== "undefined") {
-      const params = new URLSearchParams(window.location.search);
-      const tab = params.get('tab');
-      if (tab === 'link') {
-        setActiveTab('link');
-      }
-    }
-  }, []);
 
   // Responsive: switch to card view on mobile by default
   useEffect(() => {
@@ -758,77 +743,58 @@ const WalletPage = () => {
             />
           )}
 
-          {/* Tab Navigation */}
+          {/* View Toggle */}
           <div className="flex justify-between items-center mb-6">
-            <TabNavigation activeTab={activeTab} onTabChange={setActiveTab} />
-
-            {/* View Toggle - only show on positions tab */}
-            {activeTab === "positions" && (
+            <h1 className="text-2xl font-bold">Your Positions</h1>
+            <div className="flex items-center gap-3">
+              {connected && publicKey && (
+                <SyncPositionsButton
+                  walletAddress={publicKey.toBase58()}
+                  onSyncComplete={refreshPositions}
+                />
+              )}
               <ViewToggle viewMode={viewMode} onViewModeChange={setViewMode} />
-            )}
+            </div>
           </div>
 
-          {/* Tab Content */}
-          {activeTab === "link" ? (
-            <TelegramLinkTab connected={connected} publicKey={publicKey} />
-          ) : (
-            <>
-              {/* View Toggle Title - positions tab */}
-              <div className="flex justify-between items-center mb-4">
-                <h1 className="text-2xl font-bold">Your Positions</h1>
-                {connected && publicKey && (
-                  <SyncPositionsButton
-                    walletAddress={publicKey.toBase58()}
-                    onSyncComplete={refreshPositions}
-                  />
-                )}
-              </div>
-
-              {/* Credit Gate Alert */}
-              {connected && (
-                <CreditGateAlert
-                  show={connected}
-                  positionCount={positionsArray.length}
-                />
-              )}
-
-              {/* Auto-Reposition Alert - Direct users to Telegram for full automation */}
-              {connected && positionsArray.length > 0 && (
-                <AutoRepositionAlert show={connected} />
-              )}
-
-              {/* Error Message */}
-              <ErrorMessage error={error} />
-
-              {/* PnL Loading Indicator */}
-              {loadingPnl && connected && positionsArray.length > 0 && (
-                <PnLLoadingIndicator />
-              )}
-
-              {/* Loading State */}
-              {loading && <LoadingState />}
-
-              {/* Positions List */}
-              {!loading && connected && positionsArray.length > 0 && (
-                <PositionsList
-                  positionsArray={positionsArray}
-                  viewMode={viewMode}
-                  pnlData={pnlData}
-                  onPnLUpdate={updatePnL}
-                  refreshPositions={refreshPositions}
-                  PositionItemComponent={PositionItem as React.ComponentType<unknown>}
-                />
-              )}
-
-              {/* Empty State */}
-              {!loading && connected && positionsArray.length === 0 && (
-                <NoPositionsState />
-              )}
-
-              {/* Not Connected State */}
-              {!connected && !connecting && <WalletNotConnectedState />}
-            </>
+          {/* Credit Gate Alert */}
+          {connected && (
+            <CreditGateAlert
+              show={connected}
+              positionCount={positionsArray.length}
+            />
           )}
+
+          {/* Error Message */}
+          <ErrorMessage error={error} />
+
+          {/* PnL Loading Indicator */}
+          {loadingPnl && connected && positionsArray.length > 0 && (
+            <PnLLoadingIndicator />
+          )}
+
+          {/* Loading State */}
+          {loading && <LoadingState />}
+
+          {/* Positions List */}
+          {!loading && connected && positionsArray.length > 0 && (
+            <PositionsList
+              positionsArray={positionsArray}
+              viewMode={viewMode}
+              pnlData={pnlData}
+              onPnLUpdate={updatePnL}
+              refreshPositions={refreshPositions}
+              PositionItemComponent={PositionItem as React.ComponentType<unknown>}
+            />
+          )}
+
+          {/* Empty State */}
+          {!loading && connected && positionsArray.length === 0 && (
+            <NoPositionsState />
+          )}
+
+          {/* Not Connected State */}
+          {!connected && !connecting && <WalletNotConnectedState />}
         </div>
       </div>
     </PageTemplate>

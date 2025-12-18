@@ -513,12 +513,12 @@ const ChatBox: React.FC = () => {
         if (response.error === 'VALIDATION_ERROR' && response.message?.includes('already linked')) {
           addMessage(
             "assistant",
-            `✅ **Your wallet is already linked to Telegram!**\n\n🤖 Automation is ready to use. You'll receive notifications via Telegram when your positions need rebalancing.\n\n📱 **Open Telegram Bot:** [Click here to open bot](https://t.me/hypebiscus_garden_bot)\n\nOr visit the [Wallet page](/wallet?tab=link) to manage your connection.`
+            `✅ **Your wallet is already linked to Telegram!**\n\n🤖 Automation is ready to use. You'll receive notifications via Telegram when your positions need rebalancing.\n\n📱 **Open Telegram Bot:** [Click here to open bot](https://t.me/hypebiscus_garden_bot)\n\nOr visit the [Link page](/link) to manage your connection.`
           );
         } else {
           addMessage(
             "assistant",
-            `⚠️ ${response.message || 'Failed to generate link token'}\n\nPlease visit the [Wallet page](/wallet?tab=link) to manage your Telegram connection.`
+            `⚠️ ${response.message || 'Failed to generate link token'}\n\nPlease visit the [Link page](/link) to manage your Telegram connection.`
           );
         }
         return;
@@ -527,7 +527,7 @@ const ChatBox: React.FC = () => {
       if (response?.deepLink) {
         addMessage(
           "assistant",
-          `✅ **Telegram Link Ready!**\n\n**Option 1:** Click the link to open Telegram:\n👉 [Open Telegram Bot](${response.deepLink})\n\n**Option 2:** Or visit the [Wallet page](/wallet?tab=link) to see QR code and manual code options.\n\n⏱️ Link expires in 5 minutes.`
+          `✅ **Telegram Link Ready!**\n\n**Option 1:** Click the link to open Telegram:\n👉 [Open Telegram Bot](${response.deepLink})\n\n**Option 2:** Or visit the [Link page](/link) to see QR code and manual code options.\n\n⏱️ Link expires in 5 minutes.`
         );
         setShowTelegramPrompt(true);
       } else {
@@ -537,7 +537,7 @@ const ChatBox: React.FC = () => {
       console.error('Telegram link generation error:', error);
       addMessage(
         "assistant",
-        `❌ Failed to generate Telegram link. Please visit the [Wallet page](/wallet?tab=link) to link manually.`
+        `❌ Failed to generate Telegram link. Please visit the [Link page](/link) to link manually.`
       );
     }
   }, [connected, publicKey, addMessage]);
@@ -1573,7 +1573,7 @@ return (
             size="sm"
             className="flex-1"
             onClick={() => {
-              router.push('/wallet?tab=link');
+              router.push('/link');
               setShowTelegramPrompt(false);
             }}
           >
