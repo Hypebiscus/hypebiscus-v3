@@ -199,162 +199,258 @@ export class AutoRepositionWorker {
     // Process each position
     for (const position of positions) {
       positionsScanned++;
-      let actionTaken = 'none';
-      let notificationSent = false;
+      const result = await this.processPosition(
+        position,
+        walletAddress,
+        settings,
+        Boolean(canAutoSign)
+      );
 
-      try {
-        // Analyze if reposition is needed
-        const analysis = await repositionService.analyzePosition(
-          position.positionId,
-          position.poolAddress
-        );
-
-        // Determine health status
-        let healthStatus = 'healthy';
-        if (analysis.shouldReposition) {
-          if (analysis.urgency === 'high') {
-            healthStatus = 'critical';
-          } else if (analysis.urgency === 'medium') {
-            healthStatus = 'out_of_range';
-          } else {
-            healthStatus = 'warning';
-          }
-        }
-
-        // Log position scan to monitoring log
-        await this.logPositionScan(
-          position.positionId,
-          walletAddress,
-          healthStatus,
-          analysis.urgency,
-          analysis.distanceFromRange,
-          actionTaken,
-          notificationSent
-        );
-
-        // Check if reposition is recommended
-        if (!analysis.shouldReposition) {
-          continue;
-        }
-
-        // Check urgency threshold
-        const urgencyLevels = { low: 1, medium: 2, high: 3 };
-        const requiredUrgency = urgencyLevels[settings.urgencyThreshold as keyof typeof urgencyLevels] || 2;
-        const actualUrgency = urgencyLevels[analysis.urgency];
-
-        if (actualUrgency < requiredUrgency) {
-          logger.debug(
-            `Position ${position.positionId.slice(0, 8)}... urgency ${analysis.urgency} below threshold ${settings.urgencyThreshold}`
-          );
-          continue;
-        }
-
-        // Check gas cost limit
-        if (analysis.estimatedGasCost > settings.maxGasCostSol.toNumber()) {
-          logger.debug(
-            `Position ${position.positionId.slice(0, 8)}... gas cost ${analysis.estimatedGasCost} exceeds limit ${settings.maxGasCostSol.toNumber()}`
-          );
-          continue;
-        }
-
-        // Check credits
-        const credits = await prisma.user_credits.findUnique({
-          where: { walletAddress },
-        });
-
-        if (!credits || credits.balance.toNumber() < 1) {
-          logger.warn(`User ${settings.userId} has insufficient credits for auto-reposition`);
-
-          // Create notification about insufficient credits
-          await this.createNotification(
-            settings.userId,
-            walletAddress,
-            position.positionId,
-            'insufficient_credits',
-            'Auto-reposition paused: Insufficient credits. Please purchase credits to resume.'
-          );
-          notificationCount++;
-          actionTaken = 'notified';
-          notificationSent = true;
-
-          // Update monitoring log with action
-          await this.logPositionScan(
-            position.positionId,
-            walletAddress,
-            'critical',
-            analysis.urgency,
-            analysis.distanceFromRange,
-            actionTaken,
-            notificationSent
-          );
-          continue;
-        }
-
-        logger.info(
-          `🎯 Position ${position.positionId.slice(0, 8)}... needs reposition (urgency: ${analysis.urgency})`
-        );
-
-        // Execute reposition based on user type
-        if (canAutoSign) {
-          // Telegram user - execute automatically
-          const success = await this.executeReposition(
-            settings.user.wallets!,
-            walletAddress,
-            position.positionId,
-            position.poolAddress,
-            settings,
-            analysis
-          );
-
-          if (success) {
-            repositionedCount++;
-            actionTaken = 'repositioned';
-          }
-        } else {
-          // Website user - create notification
-          await this.createNotification(
-            settings.userId,
-            walletAddress,
-            position.positionId,
-            'reposition_needed',
-            `Position out of range! Urgency: ${analysis.urgency}. Estimated gas: ${analysis.estimatedGasCost.toFixed(4)} SOL.`,
-            {
-              urgency: analysis.urgency,
-              estimatedGasCost: analysis.estimatedGasCost,
-              recommendedStrategy: analysis.recommendedStrategy,
-            }
-          );
-          notificationCount++;
-          actionTaken = 'notified';
-          notificationSent = true;
-        }
-
-        // Update monitoring log with final action
-        await this.logPositionScan(
-          position.positionId,
-          walletAddress,
-          healthStatus,
-          analysis.urgency,
-          analysis.distanceFromRange,
-          actionTaken,
-          notificationSent
-        );
-      } catch (error) {
-        logger.error(`Failed to process position ${position.positionId}:`, error);
-        // Log error in monitoring log
-        await this.logPositionScan(
-          position.positionId,
-          walletAddress,
-          'unknown',
-          null,
-          null,
-          'error',
-          false
-        );
-      }
+      repositionedCount += result.repositioned;
+      notificationCount += result.notifications;
     }
 
     return { repositioned: repositionedCount, notifications: notificationCount, positionsScanned };
+  }
+
+  /**
+   * Process a single position for auto-reposition
+   */
+  private async processPosition(
+    position: any,
+    walletAddress: string,
+    settings: any,
+    canAutoSign: boolean
+  ): Promise<{ repositioned: number; notifications: number }> {
+    let actionTaken = 'none';
+    let notificationSent = false;
+
+    try {
+      // Analyze position and get health status
+      const { analysis, healthStatus } = await this.analyzePositionHealth(
+        position.positionId,
+        position.poolAddress
+      );
+
+      // Log initial position scan
+      await this.logPositionScan(
+        position.positionId,
+        walletAddress,
+        healthStatus,
+        analysis.urgency,
+        analysis.distanceFromRange,
+        actionTaken,
+        notificationSent
+      );
+
+      // Check if reposition is needed
+      if (!analysis.shouldReposition) {
+        return { repositioned: 0, notifications: 0 };
+      }
+
+      // Check if we should proceed with reposition
+      if (!this.shouldProceedWithReposition(position, analysis, settings)) {
+        return { repositioned: 0, notifications: 0 };
+      }
+
+      // Check credits
+      const hasCredits = await this.hasEnoughCredits(walletAddress);
+      if (!hasCredits) {
+        await this.handleInsufficientCredits(
+          settings.userId,
+          walletAddress,
+          position.positionId,
+          analysis
+        );
+        return { repositioned: 0, notifications: 1 };
+      }
+
+      logger.info(
+        `🎯 Position ${position.positionId.slice(0, 8)}... needs reposition (urgency: ${analysis.urgency})`
+      );
+
+      // Perform reposition (execute or notify)
+      const result = await this.performReposition(
+        position,
+        walletAddress,
+        settings,
+        analysis,
+        canAutoSign,
+        healthStatus
+      );
+
+      return result;
+    } catch (error) {
+      logger.error(`Failed to process position ${position.positionId}:`, error);
+      await this.logPositionScan(
+        position.positionId,
+        walletAddress,
+        'unknown',
+        null,
+        null,
+        'error',
+        false
+      );
+      return { repositioned: 0, notifications: 0 };
+    }
+  }
+
+  /**
+   * Analyze position and determine health status
+   */
+  private async analyzePositionHealth(
+    positionId: string,
+    poolAddress: string
+  ): Promise<{ analysis: any; healthStatus: string }> {
+    const analysis = await repositionService.analyzePosition(positionId, poolAddress);
+
+    let healthStatus = 'healthy';
+    if (analysis.shouldReposition) {
+      if (analysis.urgency === 'high') {
+        healthStatus = 'critical';
+      } else if (analysis.urgency === 'medium') {
+        healthStatus = 'out_of_range';
+      } else {
+        healthStatus = 'warning';
+      }
+    }
+
+    return { analysis, healthStatus };
+  }
+
+  /**
+   * Check if reposition should proceed based on urgency and gas cost
+   */
+  private shouldProceedWithReposition(
+    position: any,
+    analysis: any,
+    settings: any
+  ): boolean {
+    const urgencyLevels: Record<string, number> = { low: 1, medium: 2, high: 3 };
+    const requiredUrgency = urgencyLevels[settings.urgencyThreshold] || 2;
+    const actualUrgency = urgencyLevels[analysis.urgency] || 1;
+
+    if (actualUrgency < requiredUrgency) {
+      logger.debug(
+        `Position ${position.positionId.slice(0, 8)}... urgency ${analysis.urgency} below threshold ${settings.urgencyThreshold}`
+      );
+      return false;
+    }
+
+    if (analysis.estimatedGasCost > settings.maxGasCostSol.toNumber()) {
+      logger.debug(
+        `Position ${position.positionId.slice(0, 8)}... gas cost ${analysis.estimatedGasCost} exceeds limit ${settings.maxGasCostSol.toNumber()}`
+      );
+      return false;
+    }
+
+    return true;
+  }
+
+  /**
+   * Check if user has enough credits
+   */
+  private async hasEnoughCredits(walletAddress: string): Promise<boolean> {
+    const prisma = database.getClient();
+    const credits = await prisma.user_credits.findUnique({
+      where: { walletAddress },
+    });
+
+    return credits !== null && credits.balance.toNumber() >= 1;
+  }
+
+  /**
+   * Handle insufficient credits scenario
+   */
+  private async handleInsufficientCredits(
+    userId: string,
+    walletAddress: string,
+    positionId: string,
+    analysis: any
+  ): Promise<void> {
+    logger.warn(`User ${userId} has insufficient credits for auto-reposition`);
+
+    await this.createNotification(
+      userId,
+      walletAddress,
+      positionId,
+      'insufficient_credits',
+      'Auto-reposition paused: Insufficient credits. Please purchase credits to resume.'
+    );
+
+    await this.logPositionScan(
+      positionId,
+      walletAddress,
+      'critical',
+      analysis.urgency,
+      analysis.distanceFromRange,
+      'notified',
+      true
+    );
+  }
+
+  /**
+   * Perform reposition (execute or notify based on user type)
+   */
+  private async performReposition(
+    position: any,
+    walletAddress: string,
+    settings: any,
+    analysis: any,
+    canAutoSign: boolean,
+    healthStatus: string
+  ): Promise<{ repositioned: number; notifications: number }> {
+    let actionTaken = 'none';
+    let notificationSent = false;
+    let repositioned = 0;
+    let notifications = 0;
+
+    if (canAutoSign) {
+      // Telegram user - execute automatically
+      const success = await this.executeReposition(
+        settings.user.wallets!,
+        walletAddress,
+        position.positionId,
+        position.poolAddress,
+        settings,
+        analysis
+      );
+
+      if (success) {
+        repositioned = 1;
+        actionTaken = 'repositioned';
+      }
+    } else {
+      // Website user - create notification
+      await this.createNotification(
+        settings.userId,
+        walletAddress,
+        position.positionId,
+        'reposition_needed',
+        `Position out of range! Urgency: ${analysis.urgency}. Estimated gas: ${analysis.estimatedGasCost.toFixed(4)} SOL.`,
+        {
+          urgency: analysis.urgency,
+          estimatedGasCost: analysis.estimatedGasCost,
+          recommendedStrategy: analysis.recommendedStrategy,
+        }
+      );
+      notifications = 1;
+      actionTaken = 'notified';
+      notificationSent = true;
+    }
+
+    // Update monitoring log with final action
+    await this.logPositionScan(
+      position.positionId,
+      walletAddress,
+      healthStatus,
+      analysis.urgency,
+      analysis.distanceFromRange,
+      actionTaken,
+      notificationSent
+    );
+
+    return { repositioned, notifications };
   }
 
   /**
@@ -596,7 +692,7 @@ export class AutoRepositionWorker {
           healthStatus,
           urgencyLevel,
           distanceFromRange,
-          feesAvailableUsd: null, // TODO: Calculate if needed
+          feesAvailableUsd: null,
           actionTaken,
           notificationSent,
           createdAt: new Date(),
