@@ -15,7 +15,10 @@ export class PositionHandler {
 
   async handleCreatePosition(ctx: Context): Promise<void> {
     const telegramId = ctx.from?.id;
-    if (!telegramId) return;
+    if (!telegramId) {
+      await ctx.answerCbQuery('❌ Unable to identify user');
+      return;
+    }
 
     try {
       const user = await getOrCreateUser(
@@ -26,6 +29,7 @@ export class PositionHandler {
       );
 
       if (!user.wallet) {
+        await ctx.answerCbQuery('❌ No wallet found');
         await ctx.editMessageText(
           '❌ No wallet found. Create a wallet first.',
           backKeyboard
@@ -33,6 +37,7 @@ export class PositionHandler {
         return;
       }
 
+      await ctx.answerCbQuery('Opening position creator...');
       await ctx.editMessageText(
         '💰 **Create Position**\n\n' +
         'How much ZBTC do you want to provide as liquidity?\n\n' +
@@ -43,10 +48,11 @@ export class PositionHandler {
       const session = (ctx as any).session;
       session.waitingForAmount = true;
       session.userId = user.id;
-      
+
       console.log('✅ Session set for amount input:', session);
     } catch (error) {
       console.error('Error in create position:', error);
+      await ctx.answerCbQuery('❌ Failed to open');
       await ctx.editMessageText(
         '❌ Failed to start position creation. Try again.',
         backKeyboard
@@ -265,9 +271,14 @@ export class PositionHandler {
 
   async handleViewPositions(ctx: Context): Promise<void> {
     const telegramId = ctx.from?.id;
-    if (!telegramId) return;
+    if (!telegramId) {
+      await ctx.answerCbQuery('❌ Unable to identify user');
+      return;
+    }
 
     try {
+      await ctx.answerCbQuery('Loading positions...');
+
       const user = await getOrCreateUser(
         telegramId,
         ctx.from?.username,
@@ -287,7 +298,7 @@ export class PositionHandler {
       }
 
       let message = '📊 **Your Positions**\n\n';
-      
+
       for (const [index, position] of positions.entries()) {
         message += `${index + 1}. 💰 ${position.zbtcAmount} ZBTC\n`;
         message += `   🆔 \`${position.positionId.substring(0, 8)}...\`\n`;
@@ -310,7 +321,10 @@ export class PositionHandler {
 
   async handleToggleMonitoring(ctx: Context): Promise<void> {
     const telegramId = ctx.from?.id;
-    if (!telegramId) return;
+    if (!telegramId) {
+      await ctx.answerCbQuery('❌ Unable to identify user');
+      return;
+    }
 
     try {
       const user = await getOrCreateUser(
@@ -323,6 +337,7 @@ export class PositionHandler {
       const positions = await getActivePositions(user.id);
 
       if (positions.length === 0) {
+        await ctx.answerCbQuery('❌ No positions found');
         await ctx.editMessageText(
           '❌ No positions found to monitor.',
           backKeyboard
@@ -341,9 +356,13 @@ export class PositionHandler {
         backKeyboard
       );
 
+      // Answer callback to prevent Telegram from retrying
+      await ctx.answerCbQuery(newStatus ? '✅ Monitoring enabled' : '⏸️ Monitoring disabled');
+
       console.log(`📊 User ${telegramId} monitoring toggled: ${newStatus}`);
     } catch (error) {
       console.error('Error toggling monitoring:', error);
+      await ctx.answerCbQuery('❌ Toggle failed');
       await ctx.editMessageText(
         '❌ Failed to toggle monitoring. Try again.',
         backKeyboard
@@ -353,9 +372,14 @@ export class PositionHandler {
 
   async handleViewHistory(ctx: Context): Promise<void> {
     const telegramId = ctx.from?.id;
-    if (!telegramId) return;
+    if (!telegramId) {
+      await ctx.answerCbQuery('❌ Unable to identify user');
+      return;
+    }
 
     try {
+      await ctx.answerCbQuery('Loading history...');
+
       const user = await getOrCreateUser(
         telegramId,
         ctx.from?.username,
@@ -384,7 +408,7 @@ export class PositionHandler {
         const pnlUsd = Number(position.pnlUsd) || 0;
         const pnlEmoji = pnl >= 0 ? '✅' : '❌';
         const pnlSign = pnl >= 0 ? '+' : '';
-        
+
         message += `${index + 1}. ${pnlEmoji} ${pnlSign}${pnl.toFixed(2)}% (${pnlSign}$${pnlUsd.toFixed(2)})\n`;
         message += `   💰 ${position.zbtcAmount} ZBTC\n`;
         message += `   📊 Entry: $${Number(position.entryPrice).toFixed(2)}\n`;
@@ -410,9 +434,14 @@ export class PositionHandler {
 
   async handleClosePosition(ctx: Context): Promise<void> {
     const telegramId = ctx.from?.id;
-    if (!telegramId) return;
+    if (!telegramId) {
+      await ctx.answerCbQuery('❌ Unable to identify user');
+      return;
+    }
 
     try {
+      await ctx.answerCbQuery('Loading positions...');
+
       const user = await getOrCreateUser(
         telegramId,
         ctx.from?.username,
