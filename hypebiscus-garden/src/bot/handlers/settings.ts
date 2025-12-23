@@ -342,6 +342,103 @@ export async function handleSubscribeCommand(ctx: Context) {
 }
 
 /**
+ * Helper function to build settings message and keyboard
+ */
+async function buildSettingsMessage(telegramId: string) {
+  // Check if wallet is linked
+  const linkedAccount = await mcpClient.getLinkedAccount(telegramId);
+
+  if (!linkedAccount.isLinked || !linkedAccount.walletAddress) {
+    throw new Error('No wallet linked');
+  }
+
+  // Get current settings
+  const settings = await mcpClient.getRepositionSettings(telegramId) as RepositionSettings;
+
+  // Check subscription/credits status
+  const subscriptionStatus = await mcpClient.checkSubscription(linkedAccount.walletAddress);
+  const creditBalance = await mcpClient.getCreditBalance(linkedAccount.walletAddress);
+
+  // Payment status section
+  let paymentStatus = '';
+  if (subscriptionStatus.isActive) {
+    paymentStatus =
+      '✅ **Subscription Active**\n' +
+      `Tier: ${subscriptionStatus.tier}\n` +
+      `Expires: ${new Date(subscriptionStatus.expiresAt!).toLocaleDateString()}\n` +
+      `Days Remaining: ${subscriptionStatus.daysRemaining}\n`;
+  } else if (creditBalance.balance > 0) {
+    paymentStatus =
+      '💳 **Pay-per-use Credits**\n' +
+      `Balance: ${creditBalance.balance} credits\n` +
+      `Repositions Available: ${Math.floor(creditBalance.balance / 1)}\n`;
+  } else {
+    paymentStatus =
+      '⚠️ **No Active Payment**\n' +
+      'You need a subscription or credits for auto-reposition.\n';
+  }
+
+  const message =
+    '⚙️ **Auto-Reposition Settings**\n\n' +
+    '**Payment Status:**\n' +
+    paymentStatus +
+    '\n**Settings:**\n' +
+    `🔄 Auto-Reposition: ${settings.autoRepositionEnabled ? '✅ Enabled' : '❌ Disabled'}\n` +
+    `⚡ Urgency Threshold: ${settings.urgencyThreshold.toUpperCase()}\n` +
+    `⛽ Max Gas Cost: ${settings.maxGasCostSol} SOL\n` +
+    `💰 Min Fees to Collect: $${settings.minFeesToCollectUsd}\n` +
+    `📊 Allowed Strategies: ${settings.allowedStrategies.join(', ')}\n\n` +
+    '**Notifications:**\n' +
+    `📱 Telegram: ${settings.telegramNotifications ? '✅ On' : '❌ Off'}\n` +
+    `🌐 Website: ${settings.websiteNotifications ? '✅ On' : '❌ Off'}\n\n` +
+    '**Quick Commands:**\n' +
+    `/enableauto - Enable auto-repositioning\n` +
+    `/disableauto - Disable auto-repositioning\n` +
+    `/subscribe - Get unlimited repositions\n` +
+    `/credits - Check credit balance\n` +
+    `/topup - Purchase credits`;
+
+  const keyboard = {
+    inline_keyboard: [
+      [
+        {
+          text: settings.autoRepositionEnabled ? '❌ Disable Auto' : '✅ Enable Auto',
+          callback_data: settings.autoRepositionEnabled ? 'disable_auto' : 'enable_auto',
+        },
+      ],
+      [
+        {
+          text: '⚡ Change Threshold',
+          callback_data: 'change_threshold',
+        },
+        {
+          text: '⛽ Change Gas Limit',
+          callback_data: 'change_gas',
+        },
+      ],
+      [
+        {
+          text: '🔔 Toggle Notifications',
+          callback_data: 'toggle_notifications',
+        },
+      ],
+      [
+        {
+          text: subscriptionStatus.isActive ? '✅ Subscribed' : '💳 Subscribe',
+          callback_data: 'subscribe',
+        },
+        {
+          text: '🔄 Refresh',
+          callback_data: 'refresh_settings',
+        },
+      ],
+    ],
+  };
+
+  return { message, keyboard };
+}
+
+/**
  * Handle inline button callbacks
  */
 export async function handleSettingsCallback(ctx: Context) {
@@ -359,20 +456,86 @@ export async function handleSettingsCallback(ctx: Context) {
 
   try {
     switch (callbackData) {
-      case 'enable_auto':
+      case 'enable_auto': {
         await ctx.answerCbQuery('Enabling auto-reposition...');
-        await handleEnableAutoCommand(ctx);
-        break;
 
-      case 'disable_auto':
+        // Check if wallet is linked
+        const linkedAccount = await mcpClient.getLinkedAccount(telegramId.toString());
+        if (!linkedAccount.isLinked) {
+          await ctx.answerCbQuery('❌ No wallet linked', { show_alert: true });
+          return;
+        }
+
+        // Check payment status
+        const subscriptionStatus = await mcpClient.checkSubscription(linkedAccount.walletAddress!);
+        const creditBalance = await mcpClient.getCreditBalance(linkedAccount.walletAddress!);
+
+        if (!subscriptionStatus.isActive && creditBalance.balance === 0) {
+          await ctx.answerCbQuery('⚠️ Payment required', { show_alert: true });
+          await ctx.reply(
+            '⚠️ **Payment Required**\n\n' +
+            'You need a subscription or credits to enable auto-repositioning.\n\n' +
+            '**Options:**\n' +
+            '• `/subscribe` - $4.99/month for unlimited repositions\n' +
+            '• `/topup` - $0.01 USDC per reposition (pay-as-you-go)',
+            { parse_mode: 'Markdown' }
+          );
+          return;
+        }
+
+        // Enable auto-reposition
+        await mcpClient.updateRepositionSettings(telegramId.toString(), {
+          autoRepositionEnabled: true,
+        });
+
+        // Update the message with new state
+        const { message, keyboard } = await buildSettingsMessage(telegramId.toString());
+        await ctx.editMessageText(message, {
+          parse_mode: 'Markdown',
+          reply_markup: keyboard,
+        });
+
+        await ctx.answerCbQuery('✅ Auto-reposition enabled!');
+        break;
+      }
+
+      case 'disable_auto': {
         await ctx.answerCbQuery('Disabling auto-reposition...');
-        await handleDisableAutoCommand(ctx);
-        break;
 
-      case 'refresh_settings':
-        await ctx.answerCbQuery('Refreshing settings...');
-        await handleSettingsCommand(ctx);
+        // Check if wallet is linked
+        const linkedAccount = await mcpClient.getLinkedAccount(telegramId.toString());
+        if (!linkedAccount.isLinked) {
+          await ctx.answerCbQuery('❌ No wallet linked', { show_alert: true });
+          return;
+        }
+
+        // Disable auto-reposition
+        await mcpClient.updateRepositionSettings(telegramId.toString(), {
+          autoRepositionEnabled: false,
+        });
+
+        // Update the message with new state
+        const { message, keyboard } = await buildSettingsMessage(telegramId.toString());
+        await ctx.editMessageText(message, {
+          parse_mode: 'Markdown',
+          reply_markup: keyboard,
+        });
+
+        await ctx.answerCbQuery('⏸️ Auto-reposition disabled');
         break;
+      }
+
+      case 'refresh_settings': {
+        await ctx.answerCbQuery('Refreshing settings...');
+
+        // Update the message with current state
+        const { message, keyboard } = await buildSettingsMessage(telegramId.toString());
+        await ctx.editMessageText(message, {
+          parse_mode: 'Markdown',
+          reply_markup: keyboard,
+        });
+        break;
+      }
 
       case 'subscribe':
         await ctx.answerCbQuery('Opening subscription...');
