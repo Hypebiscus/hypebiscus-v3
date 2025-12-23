@@ -72,10 +72,14 @@ export class AutoRepositionWorker {
     this.isRunning = true;
     const startTime = Date.now();
 
+    const prisma = database.getClient();
+    let totalPositionsScanned = 0;
+    let totalRepositioned = 0;
+    let errorOccurred = false;
+    let lastError: string | null = null;
+
     try {
       logger.info('=== Auto-Reposition Worker Cycle Started ===');
-
-      const prisma = database.getClient();
 
       // 1. Get all users with auto-reposition enabled
       const usersWithAutoReposition = await prisma.user_reposition_settings.findMany({
@@ -94,7 +98,6 @@ export class AutoRepositionWorker {
       logger.info(`Found ${usersWithAutoReposition.length} users with auto-reposition enabled`);
 
       let totalProcessed = 0;
-      let totalRepositioned = 0;
       let totalNotifications = 0;
 
       // 2. Process each user
@@ -104,19 +107,39 @@ export class AutoRepositionWorker {
           totalProcessed++;
           totalRepositioned += result.repositioned;
           totalNotifications += result.notifications;
+          totalPositionsScanned += result.positionsScanned;
         } catch (error) {
           logger.error(`Failed to process user ${settings.userId}:`, error);
+          errorOccurred = true;
+          lastError = error instanceof Error ? error.message : String(error);
         }
       }
 
       const duration = ((Date.now() - startTime) / 1000).toFixed(2);
       logger.info('=== Auto-Reposition Worker Cycle Complete ===');
       logger.info(`Processed: ${totalProcessed} users`);
+      logger.info(`Positions Scanned: ${totalPositionsScanned}`);
       logger.info(`Repositioned: ${totalRepositioned} positions`);
       logger.info(`Notifications: ${totalNotifications} created`);
       logger.info(`Duration: ${duration}s`);
+
+      // 3. Update monitor state
+      await this.updateMonitorState(
+        totalPositionsScanned,
+        totalRepositioned,
+        errorOccurred,
+        lastError
+      );
+
+      // 4. Log metrics
+      await this.logMetrics(duration, totalPositionsScanned, totalRepositioned);
     } catch (error) {
       logger.error('Auto-reposition worker cycle failed:', error);
+      errorOccurred = true;
+      lastError = error instanceof Error ? error.message : String(error);
+
+      // Update monitor state with error
+      await this.updateMonitorState(totalPositionsScanned, totalRepositioned, true, lastError);
     } finally {
       this.isRunning = false;
     }
@@ -140,15 +163,16 @@ export class AutoRepositionWorker {
         source: string;
       } | null;
     };
-  }): Promise<{ repositioned: number; notifications: number }> {
+  }): Promise<{ repositioned: number; notifications: number; positionsScanned: number }> {
     const prisma = database.getClient();
     let repositionedCount = 0;
     let notificationCount = 0;
+    let positionsScanned = 0;
 
     const walletAddress = settings.user.linkedWalletAddress;
     if (!walletAddress) {
       logger.debug(`User ${settings.userId} has no linked wallet, skipping`);
-      return { repositioned: 0, notifications: 0 };
+      return { repositioned: 0, notifications: 0, positionsScanned: 0 };
     }
 
     // Check if user has Telegram wallet (can auto-sign) or website wallet (notifications only)
@@ -174,98 +198,259 @@ export class AutoRepositionWorker {
 
     // Process each position
     for (const position of positions) {
-      try {
-        // Analyze if reposition is needed
-        const analysis = await repositionService.analyzePosition(
+      positionsScanned++;
+      const result = await this.processPosition(
+        position,
+        walletAddress,
+        settings,
+        Boolean(canAutoSign)
+      );
+
+      repositionedCount += result.repositioned;
+      notificationCount += result.notifications;
+    }
+
+    return { repositioned: repositionedCount, notifications: notificationCount, positionsScanned };
+  }
+
+  /**
+   * Process a single position for auto-reposition
+   */
+  private async processPosition(
+    position: any,
+    walletAddress: string,
+    settings: any,
+    canAutoSign: boolean
+  ): Promise<{ repositioned: number; notifications: number }> {
+    let actionTaken = 'none';
+    let notificationSent = false;
+
+    try {
+      // Analyze position and get health status
+      const { analysis, healthStatus } = await this.analyzePositionHealth(
+        position.positionId,
+        position.poolAddress
+      );
+
+      // Log initial position scan
+      await this.logPositionScan(
+        position.positionId,
+        walletAddress,
+        healthStatus,
+        analysis.urgency,
+        analysis.distanceFromRange,
+        actionTaken,
+        notificationSent
+      );
+
+      // Check if reposition is needed
+      if (!analysis.shouldReposition) {
+        return { repositioned: 0, notifications: 0 };
+      }
+
+      // Check if we should proceed with reposition
+      if (!this.shouldProceedWithReposition(position, analysis, settings)) {
+        return { repositioned: 0, notifications: 0 };
+      }
+
+      // Check credits
+      const hasCredits = await this.hasEnoughCredits(walletAddress);
+      if (!hasCredits) {
+        await this.handleInsufficientCredits(
+          settings.userId,
+          walletAddress,
           position.positionId,
-          position.poolAddress
+          analysis
         );
+        return { repositioned: 0, notifications: 1 };
+      }
 
-        // Check if reposition is recommended
-        if (!analysis.shouldReposition) {
-          continue;
-        }
+      logger.info(
+        `🎯 Position ${position.positionId.slice(0, 8)}... needs reposition (urgency: ${analysis.urgency})`
+      );
 
-        // Check urgency threshold
-        const urgencyLevels = { low: 1, medium: 2, high: 3 };
-        const requiredUrgency = urgencyLevels[settings.urgencyThreshold as keyof typeof urgencyLevels] || 2;
-        const actualUrgency = urgencyLevels[analysis.urgency];
+      // Perform reposition (execute or notify)
+      const result = await this.performReposition(
+        position,
+        walletAddress,
+        settings,
+        analysis,
+        canAutoSign,
+        healthStatus
+      );
 
-        if (actualUrgency < requiredUrgency) {
-          logger.debug(
-            `Position ${position.positionId.slice(0, 8)}... urgency ${analysis.urgency} below threshold ${settings.urgencyThreshold}`
-          );
-          continue;
-        }
+      return result;
+    } catch (error) {
+      logger.error(`Failed to process position ${position.positionId}:`, error);
+      await this.logPositionScan(
+        position.positionId,
+        walletAddress,
+        'unknown',
+        null,
+        null,
+        'error',
+        false
+      );
+      return { repositioned: 0, notifications: 0 };
+    }
+  }
 
-        // Check gas cost limit
-        if (analysis.estimatedGasCost > settings.maxGasCostSol.toNumber()) {
-          logger.debug(
-            `Position ${position.positionId.slice(0, 8)}... gas cost ${analysis.estimatedGasCost} exceeds limit ${settings.maxGasCostSol.toNumber()}`
-          );
-          continue;
-        }
+  /**
+   * Analyze position and determine health status
+   */
+  private async analyzePositionHealth(
+    positionId: string,
+    poolAddress: string
+  ): Promise<{ analysis: any; healthStatus: string }> {
+    const analysis = await repositionService.analyzePosition(positionId, poolAddress);
 
-        // Check credits
-        const credits = await prisma.user_credits.findUnique({
-          where: { walletAddress },
-        });
-
-        if (!credits || credits.balance.toNumber() < 1) {
-          logger.warn(`User ${settings.userId} has insufficient credits for auto-reposition`);
-
-          // Create notification about insufficient credits
-          await this.createNotification(
-            settings.userId,
-            walletAddress,
-            position.positionId,
-            'insufficient_credits',
-            'Auto-reposition paused: Insufficient credits. Please purchase credits to resume.'
-          );
-          notificationCount++;
-          continue;
-        }
-
-        logger.info(
-          `🎯 Position ${position.positionId.slice(0, 8)}... needs reposition (urgency: ${analysis.urgency})`
-        );
-
-        // Execute reposition based on user type
-        if (canAutoSign) {
-          // Telegram user - execute automatically
-          const success = await this.executeReposition(
-            settings.user.wallets!,
-            walletAddress,
-            position.positionId,
-            position.poolAddress,
-            settings
-          );
-
-          if (success) {
-            repositionedCount++;
-          }
-        } else {
-          // Website user - create notification
-          await this.createNotification(
-            settings.userId,
-            walletAddress,
-            position.positionId,
-            'reposition_needed',
-            `Position out of range! Urgency: ${analysis.urgency}. Estimated gas: ${analysis.estimatedGasCost.toFixed(4)} SOL.`,
-            {
-              urgency: analysis.urgency,
-              estimatedGasCost: analysis.estimatedGasCost,
-              recommendedStrategy: analysis.recommendedStrategy,
-            }
-          );
-          notificationCount++;
-        }
-      } catch (error) {
-        logger.error(`Failed to process position ${position.positionId}:`, error);
+    let healthStatus = 'healthy';
+    if (analysis.shouldReposition) {
+      if (analysis.urgency === 'high') {
+        healthStatus = 'critical';
+      } else if (analysis.urgency === 'medium') {
+        healthStatus = 'out_of_range';
+      } else {
+        healthStatus = 'warning';
       }
     }
 
-    return { repositioned: repositionedCount, notifications: notificationCount };
+    return { analysis, healthStatus };
+  }
+
+  /**
+   * Check if reposition should proceed based on urgency and gas cost
+   */
+  private shouldProceedWithReposition(
+    position: any,
+    analysis: any,
+    settings: any
+  ): boolean {
+    const urgencyLevels: Record<string, number> = { low: 1, medium: 2, high: 3 };
+    const requiredUrgency = urgencyLevels[settings.urgencyThreshold] || 2;
+    const actualUrgency = urgencyLevels[analysis.urgency] || 1;
+
+    if (actualUrgency < requiredUrgency) {
+      logger.debug(
+        `Position ${position.positionId.slice(0, 8)}... urgency ${analysis.urgency} below threshold ${settings.urgencyThreshold}`
+      );
+      return false;
+    }
+
+    if (analysis.estimatedGasCost > settings.maxGasCostSol.toNumber()) {
+      logger.debug(
+        `Position ${position.positionId.slice(0, 8)}... gas cost ${analysis.estimatedGasCost} exceeds limit ${settings.maxGasCostSol.toNumber()}`
+      );
+      return false;
+    }
+
+    return true;
+  }
+
+  /**
+   * Check if user has enough credits
+   */
+  private async hasEnoughCredits(walletAddress: string): Promise<boolean> {
+    const prisma = database.getClient();
+    const credits = await prisma.user_credits.findUnique({
+      where: { walletAddress },
+    });
+
+    return credits !== null && credits.balance.toNumber() >= 1;
+  }
+
+  /**
+   * Handle insufficient credits scenario
+   */
+  private async handleInsufficientCredits(
+    userId: string,
+    walletAddress: string,
+    positionId: string,
+    analysis: any
+  ): Promise<void> {
+    logger.warn(`User ${userId} has insufficient credits for auto-reposition`);
+
+    await this.createNotification(
+      userId,
+      walletAddress,
+      positionId,
+      'insufficient_credits',
+      'Auto-reposition paused: Insufficient credits. Please purchase credits to resume.'
+    );
+
+    await this.logPositionScan(
+      positionId,
+      walletAddress,
+      'critical',
+      analysis.urgency,
+      analysis.distanceFromRange,
+      'notified',
+      true
+    );
+  }
+
+  /**
+   * Perform reposition (execute or notify based on user type)
+   */
+  private async performReposition(
+    position: any,
+    walletAddress: string,
+    settings: any,
+    analysis: any,
+    canAutoSign: boolean,
+    healthStatus: string
+  ): Promise<{ repositioned: number; notifications: number }> {
+    let actionTaken = 'none';
+    let notificationSent = false;
+    let repositioned = 0;
+    let notifications = 0;
+
+    if (canAutoSign) {
+      // Telegram user - execute automatically
+      const success = await this.executeReposition(
+        settings.user.wallets!,
+        walletAddress,
+        position.positionId,
+        position.poolAddress,
+        settings,
+        analysis
+      );
+
+      if (success) {
+        repositioned = 1;
+        actionTaken = 'repositioned';
+      }
+    } else {
+      // Website user - create notification
+      await this.createNotification(
+        settings.userId,
+        walletAddress,
+        position.positionId,
+        'reposition_needed',
+        `Position out of range! Urgency: ${analysis.urgency}. Estimated gas: ${analysis.estimatedGasCost.toFixed(4)} SOL.`,
+        {
+          urgency: analysis.urgency,
+          estimatedGasCost: analysis.estimatedGasCost,
+          recommendedStrategy: analysis.recommendedStrategy,
+        }
+      );
+      notifications = 1;
+      actionTaken = 'notified';
+      notificationSent = true;
+    }
+
+    // Update monitoring log with final action
+    await this.logPositionScan(
+      position.positionId,
+      walletAddress,
+      healthStatus,
+      analysis.urgency,
+      analysis.distanceFromRange,
+      actionTaken,
+      notificationSent
+    );
+
+    return { repositioned, notifications };
   }
 
   /**
@@ -280,6 +465,11 @@ export class AutoRepositionWorker {
       userId: string;
       allowedStrategies: any;
       maxGasCostSol: any;
+    },
+    analysis?: {
+      urgency: string;
+      estimatedGasCost: number;
+      reason: string;
     }
   ): Promise<boolean> {
     try {
@@ -364,9 +554,35 @@ export class AutoRepositionWorker {
       );
 
       logger.info(`🎉 Auto-reposition complete for position ${positionId.slice(0, 8)}...`);
+
+      // Log successful execution
+      await this.logRepositionExecution(
+        walletAddress,
+        positionId,
+        true,
+        unsignedTx.metadata.estimatedGasCost ?? null,
+        null,
+        signature,
+        analysis?.reason || 'Position out of range',
+        'auto'
+      );
+
       return true;
     } catch (error) {
       logger.error(`Failed to execute auto-reposition for ${positionId}:`, error);
+
+      // Log failed execution
+      await this.logRepositionExecution(
+        walletAddress,
+        positionId,
+        false,
+        null,
+        null,
+        null,
+        analysis?.reason || 'Position out of range',
+        'auto',
+        error instanceof Error ? error.message : 'Unknown error'
+      );
 
       // Send error notification
       await this.sendTelegramNotification(
@@ -451,6 +667,190 @@ export class AutoRepositionWorker {
       logger.info(`📱 Queued Telegram notification for user ${user.telegramId} (type: ${type})`);
     } catch (error) {
       logger.error('Failed to queue Telegram notification:', error);
+    }
+  }
+
+  /**
+   * Log position scan to monitoring log
+   */
+  private async logPositionScan(
+    positionAddress: string,
+    walletAddress: string,
+    healthStatus: string,
+    urgencyLevel: string | null,
+    distanceFromRange: number | null,
+    actionTaken: string,
+    notificationSent: boolean
+  ): Promise<void> {
+    try {
+      const prisma = database.getClient();
+
+      await prisma.position_monitoring_log.create({
+        data: {
+          positionAddress,
+          walletAddress,
+          healthStatus,
+          urgencyLevel,
+          distanceFromRange,
+          feesAvailableUsd: null,
+          actionTaken,
+          notificationSent,
+          createdAt: new Date(),
+        },
+      });
+    } catch (error) {
+      logger.error('Failed to log position scan:', error);
+    }
+  }
+
+  /**
+   * Log reposition execution
+   */
+  private async logRepositionExecution(
+    walletAddress: string,
+    positionAddress: string,
+    success: boolean,
+    gasCostSol: number | null,
+    feesCollectedUsd: number | null,
+    transactionSignature: string | null,
+    executionReason: string,
+    executionMode: string,
+    error?: string
+  ): Promise<void> {
+    try {
+      const prisma = database.getClient();
+
+      await prisma.reposition_executions.create({
+        data: {
+          walletAddress,
+          positionAddress,
+          subscriptionId: null,
+          success,
+          gasCostSol,
+          feesCollectedUsd,
+          error: error || null,
+          transactionSignature,
+          executionReason,
+          executionMode,
+          createdAt: new Date(),
+        },
+      });
+
+      logger.info(`📊 Logged reposition execution: ${success ? 'SUCCESS' : 'FAILED'}`);
+    } catch (error) {
+      logger.error('Failed to log reposition execution:', error);
+    }
+  }
+
+  /**
+   * Update monitor state
+   */
+  private async updateMonitorState(
+    positionsScanned: number,
+    repositionsTriggered: number,
+    errorOccurred: boolean,
+    lastError: string | null
+  ): Promise<void> {
+    try {
+      const prisma = database.getClient();
+
+      // Try to update existing state
+      const existingState = await prisma.monitor_state.findUnique({
+        where: { serviceType: 'auto_reposition_monitor' },
+      });
+
+      if (existingState) {
+        await prisma.monitor_state.update({
+          where: { serviceType: 'auto_reposition_monitor' },
+          data: {
+            isRunning: false,
+            lastRunAt: new Date(),
+            lastSuccessAt: errorOccurred ? existingState.lastSuccessAt : new Date(),
+            positionsScanned: { increment: positionsScanned },
+            repositionsTriggered: { increment: repositionsTriggered },
+            errors: errorOccurred ? { increment: 1 } : existingState.errors,
+            lastError: lastError || existingState.lastError,
+            metadata: JSON.stringify({
+              lastCycle: new Date().toISOString(),
+              positionsInCycle: positionsScanned,
+              repositionsInCycle: repositionsTriggered,
+            }),
+          },
+        });
+      } else {
+        // Create initial state
+        await prisma.monitor_state.create({
+          data: {
+            serviceType: 'auto_reposition_monitor',
+            isRunning: false,
+            lastRunAt: new Date(),
+            lastSuccessAt: errorOccurred ? new Date() : new Date(),
+            positionsScanned,
+            repositionsTriggered,
+            errors: errorOccurred ? 1 : 0,
+            lastError,
+            metadata: JSON.stringify({
+              lastCycle: new Date().toISOString(),
+              positionsInCycle: positionsScanned,
+              repositionsInCycle: repositionsTriggered,
+            }),
+          },
+        });
+      }
+
+      logger.debug('📊 Monitor state updated');
+    } catch (error) {
+      logger.error('Failed to update monitor state:', error);
+    }
+  }
+
+  /**
+   * Log metrics for monitoring dashboard
+   */
+  private async logMetrics(
+    duration: string,
+    positionsChecked: number,
+    repositionsExecuted: number
+  ): Promise<void> {
+    try {
+      const prisma = database.getClient();
+      const now = new Date();
+
+      // Log scan duration
+      await prisma.monitoring_metrics.create({
+        data: {
+          metricType: 'scan_duration',
+          metricValue: parseFloat(duration),
+          labels: JSON.stringify({ unit: 'seconds' }),
+          timestamp: now,
+        },
+      });
+
+      // Log positions checked
+      await prisma.monitoring_metrics.create({
+        data: {
+          metricType: 'positions_checked',
+          metricValue: positionsChecked,
+          labels: JSON.stringify({ unit: 'count' }),
+          timestamp: now,
+        },
+      });
+
+      // Log repositions executed
+      if (repositionsExecuted > 0) {
+        await prisma.monitoring_metrics.create({
+          data: {
+            metricType: 'repositions_executed',
+            metricValue: repositionsExecuted,
+            labels: JSON.stringify({ unit: 'count' }),
+            timestamp: now,
+          },
+        });
+      }
+
+      logger.debug('📊 Metrics logged successfully');
+    } catch (error) {
+      logger.error('Failed to log metrics:', error);
     }
   }
 }
