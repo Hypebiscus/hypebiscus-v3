@@ -33,7 +33,7 @@ import {
   handleCancelDeletion
 } from './handlers/walletDeletion';
 import { mainKeyboard, backKeyboard, helpKeyboard } from './keyboards';
-import { getOrCreateUser } from '../services/db';
+import { getOrCreateUser, getActivePositions } from '../services/db';
 import { safeLogUserInput } from '../utils/secureLogging';
 
 export class TelegramBot {
@@ -107,7 +107,7 @@ export class TelegramBot {
       const telegramId = ctx.from?.id;
       if (!telegramId) return;
 
-      await getOrCreateUser(
+      const user = await getOrCreateUser(
         telegramId,
         ctx.from?.username,
         ctx.from?.first_name,
@@ -120,12 +120,19 @@ export class TelegramBot {
         return; // Deep link was handled, don't show welcome message
       }
 
+      // Get user's actual monitoring status
+      const activePositions = await getActivePositions(user.id);
+      const monitoringStatus = user.isMonitoring ? '✅ Enabled' : '❌ Disabled';
+
       ctx.reply(
         `🚀 **Welcome to Garden - ZBTC-SOL DLMM Bot!**\n\n` +
         `This bot automatically manages your ZBTC-SOL liquidity positions:\n` +
         `• Monitors price movements 24/7\n` +
-        `• Auto-repositions when out of range\n` +
+        `• Smart auto-repositioning\n` +
         `• Simple Telegram interface\n\n` +
+        `📊 **Your Status:**\n` +
+        `🔄 Auto-Reposition: ${monitoringStatus}\n` +
+        `📍 Active Positions: ${activePositions.length}\n\n` +
         `Use the buttons below to get started!`,
         { parse_mode: 'Markdown', ...mainKeyboard }
       );
