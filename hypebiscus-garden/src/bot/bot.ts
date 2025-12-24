@@ -147,19 +147,33 @@ export class TelegramBot {
     });
 
     this.bot.command('status', async (ctx) => {
+      const telegramId = ctx.from?.id;
+      if (!telegramId) return;
+
       try {
+        const user = await getOrCreateUser(
+          telegramId,
+          ctx.from?.username,
+          ctx.from?.first_name,
+          ctx.from?.last_name
+        );
+
+        const activePositions = await getActivePositions(user.id);
         const status = this.monitoringService.getStatus();
         const poolStatus = await this.dlmmService.getPoolStatus();
-        
+
         ctx.reply(
-          `📊 **Bot Status**\n\n` +
-          `🔄 Monitoring: ${status.isMonitoring ? '✅ Active' : '❌ Inactive'}\n` +
-          `👥 Active Users: ${status.userCount || 0}\n` +
-          `📍 Total Positions: ${status.totalPositions || 0}\n\n` +
-          `💰 **ZBTC-SOL Pool**\n` +
-          `📈 Current Price: ${poolStatus.currentPrice}\n` +
+          `📊 **Monitoring Status**\n\n` +
+          `👤 **Your Account:**\n` +
+          `🔄 Auto-Reposition: ${user.isMonitoring ? '✅ Enabled' : '❌ Disabled'}\n` +
+          `📍 Active Positions: ${activePositions.length}\n\n` +
+          `🤖 **Bot System:**\n` +
+          `🔄 System Status: ${status.isMonitoring ? '✅ Running' : '❌ Stopped'}\n\n` +
+          `💰 **ZBTC-SOL Pool:**\n` +
+          `📈 Current Price: $${poolStatus.currentPrice.toFixed(6)}\n` +
           `🆔 Active Bin: ${poolStatus.activeBinId}\n` +
-          `💧 Liquidity: ${poolStatus.totalLiquidity}`,
+          `📊 24h Change: ${poolStatus.priceChange24h.toFixed(2)}%\n\n` +
+          `🕒 Last Updated: ${new Date().toLocaleTimeString()}`,
           { parse_mode: 'Markdown' }
         );
       } catch (error) {
