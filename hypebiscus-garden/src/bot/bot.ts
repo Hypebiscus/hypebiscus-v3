@@ -133,6 +133,15 @@ export class TelegramBot {
         `📊 **Your Status:**\n` +
         `🔄 Auto-Reposition: ${monitoringStatus}\n` +
         `📍 Active Positions: ${activePositions.length}\n\n` +
+        `🤖 **Auto-Reposition Features:**\n` +
+        `• 24/7 position monitoring\n` +
+        `• Automatic out-of-range detection\n` +
+        `• Smart repositioning\n` +
+        `• Real-time notifications\n\n` +
+        `💳 **Requirements:**\n` +
+        `• Active subscription OR credits\n` +
+        `• Wallet linked to Telegram\n` +
+        `• Active positions to monitor\n\n` +
         `Use the buttons below to get started!`,
         { parse_mode: 'Markdown', ...mainKeyboard }
       );
@@ -147,7 +156,7 @@ export class TelegramBot {
     });
 
     this.bot.command('status', async (ctx) => {
-      const telegramId = ctx.from?.id;
+       const telegramId = ctx.from?.id;
       if (!telegramId) return;
 
       try {
