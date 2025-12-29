@@ -16,6 +16,13 @@ export class MonitoringService {
   private cronJob: cron.ScheduledTask | null = null;
   private isRunning = false;
 
+  // Notification throttling: Track last notification time per user/type
+  // Format: "telegramId:notificationType" -> timestamp
+  private lastNotificationTime: Map<string, number> = new Map();
+
+  // Throttle limits: 3 notifications per day = every 8 hours
+  private readonly NOTIFICATION_THROTTLE_MS = 8 * 60 * 60 * 1000; // 8 hours in milliseconds
+
   constructor(
     dlmmService: DlmmService,
     walletService: WalletService,
@@ -57,6 +64,38 @@ export class MonitoringService {
     console.log('✅ Monitoring service stopped');
   }
 
+  /**
+   * Check if notification should be sent based on throttling rules
+   * Limits: 3 notifications per day = every 8 hours
+   */
+  private shouldSendNotification(
+    telegramId: bigint,
+    notificationType: 'no_subscription' | 'subscription_check_failed'
+  ): boolean {
+    const key = `${telegramId}:${notificationType}`;
+    const now = Date.now();
+    const lastSent = this.lastNotificationTime.get(key);
+
+    if (!lastSent) {
+      // First notification, always send
+      this.lastNotificationTime.set(key, now);
+      return true;
+    }
+
+    const timeSinceLastNotification = now - lastSent;
+
+    if (timeSinceLastNotification >= this.NOTIFICATION_THROTTLE_MS) {
+      // 8 hours have passed, send notification
+      this.lastNotificationTime.set(key, now);
+      return true;
+    }
+
+    // Still within throttle window, skip notification
+    const hoursRemaining = Math.ceil((this.NOTIFICATION_THROTTLE_MS - timeSinceLastNotification) / (60 * 60 * 1000));
+    console.log(`⏸️ Notification throttled for user ${telegramId} (${notificationType}). Next notification in ~${hoursRemaining}h`);
+    return false;
+  }
+
   private async checkAllPositions(): Promise<void> {
     try {
       const users = await db.getAllMonitoringUsers();
@@ -90,16 +129,272 @@ export class MonitoringService {
   }
 
   /**
-   * IMPROVED: Check position with PnL tracking
+   * Verify user has access (subscription or credits) and fetch settings
+   * Returns access info or null if access denied
+   */
+  private async verifyUserAccess(user: any, position: any): Promise<{
+    hasAccess: boolean;
+    accessMode: 'subscription' | 'credits';
+    linkedAccount: any;
+    userSettings: any;
+  } | null> {
+    let linkedAccount: any = null;
+    let userSettings: any = null;
+
+    try {
+      // Get linked wallet address
+      linkedAccount = await mcpClient.getLinkedAccount(user.telegramId.toString());
+
+      if (!linkedAccount.isLinked || !linkedAccount.walletAddress) {
+        console.log(`❌ User ${user.telegramId} has no linked wallet`);
+        await this.notifyUser(
+          user.telegramId,
+          'subscription_required',
+          position,
+          null,
+          new Error('No linked wallet. Link your wallet on the website to enable auto-reposition.')
+        );
+        return null;
+      }
+
+      console.log(`🔍 Checking access for wallet: ${linkedAccount.walletAddress.substring(0, 8)}...`);
+
+      // OPTION 1: Check subscription (unlimited repositions)
+      const subscriptionStatus = await mcpClient.checkSubscription(linkedAccount.walletAddress);
+
+      if (subscriptionStatus.isActive) {
+        console.log(`✅ Active subscription found: tier=${subscriptionStatus.tier}, expires=${subscriptionStatus.expiresAt}`);
+
+        // Get user settings
+        try {
+          userSettings = await mcpClient.getRepositionSettings(user.telegramId.toString());
+          if (!userSettings.autoRepositionEnabled) {
+            console.log(`⏸️ Auto-reposition disabled in user settings`);
+            return null;
+          }
+          console.log(`✅ User settings loaded: threshold=${userSettings.urgencyThreshold}, maxGas=${userSettings.maxGasCostSol}`);
+        } catch (settingsError) {
+          console.log(`⚠️ Could not fetch reposition settings:`, settingsError);
+        }
+
+        return {
+          hasAccess: true,
+          accessMode: 'subscription',
+          linkedAccount,
+          userSettings,
+        };
+      }
+
+      // OPTION 2: Check credits (pay-per-use)
+      console.log(`❌ No active subscription, checking credits...`);
+
+      try {
+        const creditsBalance = await mcpClient.getCreditBalance(linkedAccount.walletAddress!);
+
+        if (!creditsBalance || creditsBalance.balance < 1) {
+          console.log(`❌ Insufficient credits: balance=${creditsBalance?.balance || 0}`);
+          await this.notifyUser(user.telegramId, 'no_subscription', position);
+          return null;
+        }
+
+        console.log(`✅ Sufficient credits found: balance=${creditsBalance.balance}`);
+
+        // Get user settings
+        try {
+          userSettings = await mcpClient.getRepositionSettings(user.telegramId.toString());
+          if (!userSettings.autoRepositionEnabled) {
+            console.log(`⏸️ Auto-reposition disabled in user settings`);
+            return null;
+          }
+          console.log(`✅ User settings loaded: threshold=${userSettings.urgencyThreshold}, maxGas=${userSettings.maxGasCostSol}`);
+        } catch (settingsError) {
+          console.log(`⚠️ Could not fetch reposition settings:`, settingsError);
+        }
+
+        return {
+          hasAccess: true,
+          accessMode: 'credits',
+          linkedAccount,
+          userSettings,
+        };
+      } catch (creditsError) {
+        console.error(`❌ Error checking credits:`, creditsError);
+        await this.notifyUser(user.telegramId, 'no_subscription', position);
+        return null;
+      }
+    } catch (error) {
+      console.error(`❌ Subscription check failed:`, error);
+      await this.notifyUser(
+        user.telegramId,
+        'subscription_check_failed',
+        position,
+        null,
+        error as Error
+      );
+      return null;
+    }
+  }
+
+  /**
+   * Execute reposition and track balance changes
+   */
+  private async executeRepositionWithBalanceTracking(
+    user: any,
+    position: any
+  ): Promise<{ repositionResult: any; balanceBefore: any; balanceAfter: any } | null> {
+    // Get keypair
+    const keypair = await this.walletService.getKeypair(user.id);
+    if (!keypair) {
+      throw new Error('Failed to get user keypair');
+    }
+
+    // Get balance BEFORE reposition (for fee calculation)
+    const balanceBefore = await this.walletService.getBalance(user.id);
+    if (!balanceBefore) {
+      throw new Error('Failed to get balance before reposition');
+    }
+
+    console.log(`💰 Balance before: ${balanceBefore.zbtc.toFixed(8)} ZBTC, ${balanceBefore.sol.toFixed(6)} SOL`);
+
+    // Execute reposition with tracking
+    console.log(`🔄 Executing reposition with tracking...`);
+    const repositionResult = await this.dlmmService.repositionLiquidityWithTracking(
+      keypair,
+      position.positionId,
+      Number(position.zbtcAmount),
+      Number(position.solAmount)
+    );
+
+    // Get balance AFTER reposition
+    await new Promise(resolve => setTimeout(resolve, 2000));
+    const balanceAfter = await this.walletService.getBalance(user.id);
+    if (!balanceAfter) {
+      throw new Error('Failed to get balance after reposition');
+    }
+
+    console.log(`💰 Balance after: ${balanceAfter.zbtc.toFixed(8)} ZBTC, ${balanceAfter.sol.toFixed(6)} SOL`);
+
+    return { repositionResult, balanceBefore, balanceAfter };
+  }
+
+  /**
+   * Handle post-reposition updates: database, credits, execution recording
+   */
+  private async handlePostRepositionUpdates(
+    user: any,
+    position: any,
+    repositionResult: any,
+    balanceBefore: any,
+    balanceAfter: any,
+    accessMode: 'subscription' | 'credits',
+    linkedAccount: any
+  ): Promise<void> {
+    // Calculate balance changes
+    const balanceChange = {
+      zbtc: balanceAfter.zbtc - balanceBefore.zbtc,
+      sol: balanceAfter.sol - balanceBefore.sol
+    };
+
+    const zbtcReturned = Number(position.zbtcAmount) + balanceChange.zbtc;
+    const solReturned = Number(position.solAmount) + balanceChange.sol;
+
+    console.log(`📊 Returned from closed position:`);
+    console.log(`   ZBTC: ${zbtcReturned.toFixed(8)}`);
+    console.log(`   SOL: ${solReturned.toFixed(6)}`);
+
+    const newSolUsed = Number(position.solAmount) - balanceChange.sol;
+
+    // Update database with full tracking
+    await this.updateDatabaseAfterReposition(
+      user.id,
+      position.positionId,
+      repositionResult.positionId,
+      zbtcReturned,
+      solReturned,
+      repositionResult.exitPrice,
+      repositionResult.exitBin,
+      Number(position.zbtcAmount),
+      newSolUsed,
+      repositionResult.entryPrice,
+      repositionResult.entryBin
+    );
+
+    // Update user stats
+    await db.updateUserStats(user.id);
+
+    // Record execution and handle credits
+    if (linkedAccount && linkedAccount.isLinked && linkedAccount.walletAddress) {
+      await this.recordExecutionAndHandleCredits(
+        linkedAccount.walletAddress,
+        repositionResult.positionId,
+        balanceBefore,
+        balanceAfter,
+        solReturned,
+        position.solAmount,
+        accessMode
+      );
+    }
+  }
+
+  /**
+   * Record execution to MCP and deduct credits if pay-per-use
+   */
+  private async recordExecutionAndHandleCredits(
+    walletAddress: string,
+    positionId: string,
+    balanceBefore: any,
+    balanceAfter: any,
+    solReturned: number,
+    originalSolAmount: number,
+    accessMode: 'subscription' | 'credits'
+  ): Promise<void> {
+    try {
+      // Calculate gas cost (approximate from SOL balance change)
+      const gasCostSol = balanceBefore.sol - balanceAfter.sol - (solReturned - Number(originalSolAmount));
+
+      // Record execution to MCP
+      await mcpClient.recordExecution({
+        walletAddress,
+        positionAddress: positionId,
+        success: true,
+        gasCostSol: Math.max(0, gasCostSol),
+        feesCollectedUsd: 0,
+        executionMode: 'auto',
+      });
+
+      console.log(`📊 Execution recorded: gas=${gasCostSol.toFixed(6)} SOL`);
+
+      // Deduct credits if using pay-per-use
+      if (accessMode === 'credits') {
+        try {
+          await mcpClient.useCredits(
+            walletAddress,
+            1,
+            positionId,
+            `Auto-reposition executed for position ${positionId.slice(0, 8)}...`
+          );
+
+          const updatedBalance = await mcpClient.getCreditBalance(walletAddress);
+          console.log(`💳 1 credit deducted. Remaining balance: ${updatedBalance.balance} credits`);
+        } catch (creditError) {
+          console.error(`❌ Failed to deduct credits:`, creditError);
+        }
+      }
+    } catch (recordError) {
+      console.error(`⚠️ Failed to record execution:`, recordError);
+    }
+  }
+
+  /**
+   * Check position and execute auto-reposition if needed
+   * Orchestrates the entire reposition workflow
    */
   private async checkPosition(user: any, position: any): Promise<void> {
     try {
       await db.updatePositionLastChecked(position.positionId);
 
-      const isOutOfRange = await this.dlmmService.isPositionOutOfRange(
-        position.positionId
-      );
-
+      // Check if position is out of range
+      const isOutOfRange = await this.dlmmService.isPositionOutOfRange(position.positionId);
       if (!isOutOfRange) {
         console.log(`✅ Position ${position.positionId.substring(0, 8)}... in range`);
         return;
@@ -113,216 +408,35 @@ export class MonitoringService {
         return;
       }
 
-      // ===== X402 SUBSCRIPTION OR CREDITS CHECK =====
-      // Check if user has active subscription OR sufficient credits
-      let hasAccess = false;
-      let accessMode: 'subscription' | 'credits' = 'subscription';
-      let userSettings: any = null;
-      let linkedAccount: any = null;
-
-      try {
-        // Get linked wallet address
-        linkedAccount = await mcpClient.getLinkedAccount(user.telegramId.toString());
-
-        if (!linkedAccount.isLinked || !linkedAccount.walletAddress) {
-          console.log(`❌ User ${user.telegramId} has no linked wallet`);
-          await this.notifyUser(
-            user.telegramId,
-            'subscription_required',
-            position,
-            null,
-            new Error('No linked wallet. Link your wallet on the website to enable auto-reposition.')
-          );
-          return;
-        }
-
-        console.log(`🔍 Checking access for wallet: ${linkedAccount.walletAddress.substring(0, 8)}...`);
-
-        // OPTION 1: Check subscription (unlimited repositions)
-        const subscriptionStatus = await mcpClient.checkSubscription(linkedAccount.walletAddress);
-
-        if (subscriptionStatus.isActive) {
-          console.log(`✅ Active subscription found: tier=${subscriptionStatus.tier}, expires=${subscriptionStatus.expiresAt}`);
-          hasAccess = true;
-          accessMode = 'subscription';
-        } else {
-          // OPTION 2: Check credits (pay-per-use)
-          console.log(`❌ No active subscription, checking credits...`);
-
-          try {
-            const creditsBalance = await mcpClient.getCreditBalance(linkedAccount.walletAddress!);
-
-            if (creditsBalance && creditsBalance.balance >= 1) {
-              console.log(`✅ Sufficient credits found: balance=${creditsBalance.balance}`);
-              hasAccess = true;
-              accessMode = 'credits';
-            } else {
-              console.log(`❌ Insufficient credits: balance=${creditsBalance?.balance || 0}`);
-              await this.notifyUser(user.telegramId, 'no_subscription', position);
-              return;
-            }
-          } catch (creditsError) {
-            console.error(`❌ Error checking credits:`, creditsError);
-            await this.notifyUser(user.telegramId, 'no_subscription', position);
-            return;
-          }
-        }
-
-        // Get user reposition settings
-        try {
-          userSettings = await mcpClient.getRepositionSettings(user.telegramId.toString());
-
-          // Check if auto-reposition is enabled in settings
-          if (!userSettings.autoRepositionEnabled) {
-            console.log(`⏸️ Auto-reposition disabled in user settings`);
-            return; // Silent skip - user disabled it
-          }
-
-          console.log(`✅ User settings loaded: threshold=${userSettings.urgencyThreshold}, maxGas=${userSettings.maxGasCostSol}`);
-        } catch (settingsError) {
-          console.log(`⚠️ Could not fetch reposition settings:`, settingsError);
-          // Continue with default settings if fetch fails
-        }
-
-      } catch (error) {
-        console.error(`❌ Subscription check failed:`, error);
-        await this.notifyUser(
-          user.telegramId,
-          'subscription_check_failed',
-          position,
-          null,
-          error as Error
-        );
-        return;
+      // Verify user has access (subscription or credits)
+      const accessInfo = await this.verifyUserAccess(user, position);
+      if (!accessInfo) {
+        return; // Access denied, user already notified
       }
 
-      if (!hasAccess) {
-        console.log(`❌ User ${user.telegramId} has no active subscription or credits`);
-        await this.notifyUser(user.telegramId, 'no_subscription', position);
-        return;
-      }
-
-      console.log(`✅ Access granted (${accessMode}) - proceeding with auto-reposition`);
-      // ===== END SUBSCRIPTION CHECK =====
+      console.log(`✅ Access granted (${accessInfo.accessMode}) - proceeding with auto-reposition`);
 
       // Notify user: Starting
       await this.notifyUser(user.telegramId, 'starting', position);
 
-      // Get keypair
-      const keypair = await this.walletService.getKeypair(user.id);
-      if (!keypair) {
-        throw new Error('Failed to get user keypair');
+      // Execute reposition with balance tracking
+      const result = await this.executeRepositionWithBalanceTracking(user, position);
+      if (!result) {
+        throw new Error('Reposition execution failed');
       }
 
-      // Get balance BEFORE reposition (for fee calculation)
-      const balanceBefore = await this.walletService.getBalance(user.id);
-      
-      if (!balanceBefore) {
-        throw new Error('Failed to get balance before reposition');
-      }
+      const { repositionResult, balanceBefore, balanceAfter } = result;
 
-      console.log(`💰 Balance before: ${balanceBefore.zbtc.toFixed(8)} ZBTC, ${balanceBefore.sol.toFixed(6)} SOL`);
-
-      // Execute reposition with tracking
-      console.log(`🔄 Executing reposition with tracking...`);
-      const repositionResult = await this.dlmmService.repositionLiquidityWithTracking(
-        keypair,
-        position.positionId,
-        Number(position.zbtcAmount),
-        Number(position.solAmount)
+      // Handle all post-reposition updates (database, credits, recording)
+      await this.handlePostRepositionUpdates(
+        user,
+        position,
+        repositionResult,
+        balanceBefore,
+        balanceAfter,
+        accessInfo.accessMode,
+        accessInfo.linkedAccount
       );
-
-      // Get balance AFTER reposition
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      const balanceAfter = await this.walletService.getBalance(user.id);
-      
-      if (!balanceAfter) {
-        throw new Error('Failed to get balance after reposition');
-      }
-
-      console.log(`💰 Balance after: ${balanceAfter.zbtc.toFixed(8)} ZBTC, ${balanceAfter.sol.toFixed(6)} SOL`);
-
-      // Calculate what was returned from closing position
-      // Balance change = (original + fees returned) - amount used for new position
-      const balanceChange = {
-        zbtc: balanceAfter.zbtc - balanceBefore.zbtc,
-        sol: balanceAfter.sol - balanceBefore.sol
-      };
-
-      // Amounts returned = original + balance change
-      const zbtcReturned = Number(position.zbtcAmount) + balanceChange.zbtc;
-      const solReturned = Number(position.solAmount) + balanceChange.sol;
-
-      console.log(`📊 Returned from closed position:`);
-      console.log(`   ZBTC: ${zbtcReturned.toFixed(8)}`);
-      console.log(`   SOL: ${solReturned.toFixed(6)}`);
-
-      // Calculate SOL used for new position
-      const newSolUsed = Number(position.solAmount) - balanceChange.sol;
-
-      // Update database with full tracking
-      await this.updateDatabaseAfterReposition(
-        user.id,
-        position.positionId,
-        repositionResult.positionId,
-        zbtcReturned,
-        solReturned,
-        repositionResult.exitPrice,
-        repositionResult.exitBin,
-        Number(position.zbtcAmount),
-        newSolUsed,
-        repositionResult.entryPrice,
-        repositionResult.entryBin
-      );
-
-      // Update user stats
-      await db.updateUserStats(user.id);
-
-      // ===== RECORD EXECUTION TO MCP =====
-      // Record this reposition execution for usage tracking
-      try {
-        if (linkedAccount && linkedAccount.isLinked && linkedAccount.walletAddress) {
-          // Calculate gas cost (approximate from SOL balance change)
-          const gasCostSol = balanceBefore.sol - balanceAfter.sol - (solReturned - Number(position.solAmount));
-
-          // Record execution to MCP
-          await mcpClient.recordExecution({
-            walletAddress: linkedAccount.walletAddress,
-            positionAddress: repositionResult.positionId,
-            success: true,
-            gasCostSol: Math.max(0, gasCostSol), // Ensure non-negative
-            feesCollectedUsd: 0, // TODO: Calculate fees collected
-            executionMode: 'auto',
-          });
-
-          console.log(`📊 Execution recorded: gas=${gasCostSol.toFixed(6)} SOL`);
-
-          // ===== DEDUCT CREDITS IF USING PAY-PER-USE =====
-          if (accessMode === 'credits') {
-            try {
-              await mcpClient.useCredits(
-                linkedAccount.walletAddress!,
-                1,
-                repositionResult.positionId,
-                `Auto-reposition executed for position ${repositionResult.positionId.slice(0, 8)}...`
-              );
-
-              // Get updated balance to show user
-              const updatedBalance = await mcpClient.getCreditBalance(linkedAccount.walletAddress!);
-
-              console.log(`💳 1 credit deducted. Remaining balance: ${updatedBalance.balance} credits`);
-            } catch (creditError) {
-              console.error(`❌ Failed to deduct credits:`, creditError);
-              // Log but don't fail the reposition since it already executed successfully
-            }
-          }
-          // ===== END CREDITS DEDUCTION =====
-        }
-      } catch (recordError) {
-        console.error(`⚠️ Failed to record execution:`, recordError);
-        // Don't fail the reposition if recording fails
-      }
-      // ===== END EXECUTION RECORDING =====
 
       // Notify user: Success
       await this.notifyUser(user.telegramId, 'success', position, repositionResult);
@@ -392,7 +506,132 @@ export class MonitoringService {
   }
 
   /**
+   * Build message for reposition starting notification
+   */
+  private buildStartingMessage(position: any): string {
+    return (
+      `⚠️ **Position Out of Range**\n\n` +
+      `🆔 Position: \`${position.positionId.substring(0, 8)}...\`\n` +
+      `💰 Amount: ${position.zbtcAmount} ZBTC + ${Number(position.solAmount).toFixed(4)} SOL\n\n` +
+      `🔄 Auto-repositioning in progress...\n` +
+      `⏱️ This may take 30-60 seconds.`
+    );
+  }
+
+  /**
+   * Build message for successful reposition with PnL info
+   */
+  private async buildSuccessMessage(position: any, repositionResult: any): Promise<string> {
+    const closedPosition = await db.getPositionById(position.positionId);
+
+    const pnlEmoji = closedPosition && Number(closedPosition.pnlUsd || 0) >= 0 ? '📈' : '📉';
+    const pnlSign = closedPosition && Number(closedPosition.pnlUsd || 0) >= 0 ? '+' : '';
+    const pnlText = closedPosition
+      ? `${pnlEmoji} PnL: ${pnlSign}$${Number(closedPosition.pnlUsd || 0).toFixed(2)} (${pnlSign}${Number(closedPosition.pnlPercent || 0).toFixed(2)}%)\n`
+      : '';
+
+    const feesText = closedPosition && (Number(closedPosition.zbtcFees) > 0 || Number(closedPosition.solFees) > 0)
+      ? `💰 Fees: ${Number(closedPosition.zbtcFees).toFixed(8)} ZBTC + ${Number(closedPosition.solFees).toFixed(6)} SOL\n`
+      : '';
+
+    return (
+      `✅ **Successfully Repositioned!**\n\n` +
+      `🔴 Old Position: \`${position.positionId.substring(0, 8)}...\`\n` +
+      `🟢 New Position: \`${repositionResult.positionId.substring(0, 8)}...\`\n\n` +
+      `📊 Exit: $${repositionResult.exitPrice.toFixed(2)} (Bin ${repositionResult.exitBin})\n` +
+      `📊 Entry: $${repositionResult.entryPrice.toFixed(2)} (Bin ${repositionResult.entryBin})\n\n` +
+      pnlText +
+      feesText +
+      `💰 Amount: ${position.zbtcAmount} ZBTC\n` +
+      `🛡️ Buffer: ±10 bins\n\n` +
+      `🔄 Monitoring continues automatically.`
+    );
+  }
+
+  /**
+   * Build message for reposition error
+   */
+  private buildErrorMessage(position: any, error?: Error): string {
+    const errorMsg = error?.message || 'Unknown error';
+    let message = '❌ **Repositioning Failed**\n\n';
+
+    if (errorMsg.includes('CRITICAL')) {
+      message +=
+        `⚠️ Old position was closed but new position creation failed.\n\n` +
+        `📍 Your liquidity (${position.zbtcAmount} ZBTC) is now in your wallet.\n\n` +
+        `🔧 **Action Required:**\n` +
+        `Please create a new position manually using the bot menu.\n\n`;
+    } else if (errorMsg.includes('cooldown')) {
+      message +=
+        `⏳ Position is on cooldown.\n\n` +
+        `The bot will try again in a few minutes.\n\n`;
+    } else if (errorMsg.includes('volatile') || errorMsg.includes('slippage')) {
+      message +=
+        `📊 Market is very volatile right now.\n\n` +
+        `The bot will retry automatically.\n\n`;
+    } else {
+      message +=
+        `Error: ${errorMsg.substring(0, 200)}\n\n` +
+        `The bot will try again on the next check.\n\n`;
+    }
+
+    message += `🆔 Position: \`${position.positionId.substring(0, 8)}...\``;
+    return message;
+  }
+
+  /**
+   * Build message for subscription required notification
+   */
+  private buildSubscriptionRequiredMessage(position: any, error?: Error): string {
+    return (
+      `💳 **Subscription Required**\n\n` +
+      `🆔 Position: \`${position.positionId.substring(0, 8)}...\`\n` +
+      `⚠️ Position is out of range!\n\n` +
+      `${error?.message || 'Auto-reposition requires an active subscription.'}\n\n` +
+      `🌐 **Subscribe on Website:**\n` +
+      `1. Visit https://hypebiscus.com\n` +
+      `2. Connect your wallet\n` +
+      `3. Subscribe for $4.99/month\n\n` +
+      `✨ **Benefits:**\n` +
+      `• Unlimited auto-repositions\n` +
+      `• Telegram notifications\n` +
+      `• AI-powered analysis\n\n` +
+      `💡 Start monitoring your positions automatically!`
+    );
+  }
+
+  /**
+   * Build message for no subscription notification
+   */
+  private buildNoSubscriptionMessage(position: any): string {
+    return (
+      `💳 **No Active Subscription**\n\n` +
+      `🆔 Position: \`${position.positionId.substring(0, 8)}...\`\n` +
+      `⚠️ Position is out of range but cannot auto-reposition.\n\n` +
+      `Your subscription may have expired or hasn't been activated yet.\n\n` +
+      `🌐 **Renew Subscription:**\n` +
+      `Visit https://hypebiscus.com to subscribe ($4.99/month)\n\n` +
+      `📱 Use /status to check subscription details.`
+    );
+  }
+
+  /**
+   * Build message for subscription check failed notification
+   */
+  private buildSubscriptionCheckFailedMessage(position: any, error?: Error): string {
+    return (
+      `⚠️ **Subscription Check Failed**\n\n` +
+      `🆔 Position: \`${position.positionId.substring(0, 8)}...\`\n` +
+      `❌ Could not verify subscription status.\n\n` +
+      `Error: ${error?.message || 'Unknown error'}\n\n` +
+      `🔄 The bot will retry on the next check.\n` +
+      `💡 If this persists, contact support.`
+    );
+  }
+
+  /**
    * IMPROVED: Notify user with PnL info + subscription notifications
+   * Now includes throttling for spam prevention (max 3 notifications per day for no_subscription/subscription_check_failed)
    */
   private async notifyUser(
     telegramId: bigint,
@@ -402,118 +641,42 @@ export class MonitoringService {
     error?: Error
   ): Promise<void> {
     try {
-      let message = '';
-      
+      // Apply throttling for subscription-related notifications to prevent spam
+      if (type === 'no_subscription' || type === 'subscription_check_failed') {
+        if (!this.shouldSendNotification(telegramId, type)) {
+          return; // Notification throttled, skip sending
+        }
+      }
+
+      // Build message based on notification type
+      let message: string;
       switch (type) {
         case 'starting':
-          message = 
-            `⚠️ **Position Out of Range**\n\n` +
-            `🆔 Position: \`${position.positionId.substring(0, 8)}...\`\n` +
-            `💰 Amount: ${position.zbtcAmount} ZBTC + ${Number(position.solAmount).toFixed(4)} SOL\n\n` +
-            `🔄 Auto-repositioning in progress...\n` +
-            `⏱️ This may take 30-60 seconds.`;
+          message = this.buildStartingMessage(position);
           break;
-          
         case 'success':
-          // Get position from DB to show PnL
-          const closedPosition = await db.getPositionById(position.positionId);
-          
-          const pnlEmoji = closedPosition && Number(closedPosition.pnlUsd || 0) >= 0 ? '📈' : '📉';
-          const pnlSign = closedPosition && Number(closedPosition.pnlUsd || 0) >= 0 ? '+' : '';
-          const pnlText = closedPosition 
-            ? `${pnlEmoji} PnL: ${pnlSign}$${Number(closedPosition.pnlUsd || 0).toFixed(2)} (${pnlSign}${Number(closedPosition.pnlPercent || 0).toFixed(2)}%)\n`
-            : '';
-          
-          const feesText = closedPosition && (Number(closedPosition.zbtcFees) > 0 || Number(closedPosition.solFees) > 0)
-            ? `💰 Fees: ${Number(closedPosition.zbtcFees).toFixed(8)} ZBTC + ${Number(closedPosition.solFees).toFixed(6)} SOL\n`
-            : '';
-
-          message = 
-            `✅ **Successfully Repositioned!**\n\n` +
-            `🔴 Old Position: \`${position.positionId.substring(0, 8)}...\`\n` +
-            `🟢 New Position: \`${repositionResult.positionId.substring(0, 8)}...\`\n\n` +
-            `📊 Exit: $${repositionResult.exitPrice.toFixed(2)} (Bin ${repositionResult.exitBin})\n` +
-            `📊 Entry: $${repositionResult.entryPrice.toFixed(2)} (Bin ${repositionResult.entryBin})\n\n` +
-            pnlText +
-            feesText +
-            `💰 Amount: ${position.zbtcAmount} ZBTC\n` +
-            `🛡️ Buffer: ±10 bins\n\n` +
-            `🔄 Monitoring continues automatically.`;
+          message = await this.buildSuccessMessage(position, repositionResult);
           break;
-          
         case 'error':
-          const errorMsg = error?.message || 'Unknown error';
-          let userMessage = '❌ **Repositioning Failed**\n\n';
-          
-          if (errorMsg.includes('CRITICAL')) {
-            userMessage += 
-              `⚠️ Old position was closed but new position creation failed.\n\n` +
-              `📍 Your liquidity (${position.zbtcAmount} ZBTC) is now in your wallet.\n\n` +
-              `🔧 **Action Required:**\n` +
-              `Please create a new position manually using the bot menu.\n\n`;
-          } else if (errorMsg.includes('cooldown')) {
-            userMessage += 
-              `⏳ Position is on cooldown.\n\n` +
-              `The bot will try again in a few minutes.\n\n`;
-          } else if (errorMsg.includes('volatile') || errorMsg.includes('slippage')) {
-            userMessage += 
-              `📊 Market is very volatile right now.\n\n` +
-              `The bot will retry automatically.\n\n`;
-          } else {
-            userMessage += 
-              `Error: ${errorMsg.substring(0, 200)}\n\n` +
-              `The bot will try again on the next check.\n\n`;
-          }
-          
-          userMessage += `🆔 Position: \`${position.positionId.substring(0, 8)}...\``;
-          message = userMessage;
+          message = this.buildErrorMessage(position, error);
           break;
-
         case 'subscription_required':
-          message =
-            `💳 **Subscription Required**\n\n` +
-            `🆔 Position: \`${position.positionId.substring(0, 8)}...\`\n` +
-            `⚠️ Position is out of range!\n\n` +
-            `${error?.message || 'Auto-reposition requires an active subscription.'}\n\n` +
-            `🌐 **Subscribe on Website:**\n` +
-            `1. Visit https://hypebiscus.com\n` +
-            `2. Connect your wallet\n` +
-            `3. Subscribe for $4.99/month\n\n` +
-            `✨ **Benefits:**\n` +
-            `• Unlimited auto-repositions\n` +
-            `• Telegram notifications\n` +
-            `• AI-powered analysis\n\n` +
-            `💡 Start monitoring your positions automatically!`;
+          message = this.buildSubscriptionRequiredMessage(position, error);
           break;
-
         case 'no_subscription':
-          message =
-            `💳 **No Active Subscription**\n\n` +
-            `🆔 Position: \`${position.positionId.substring(0, 8)}...\`\n` +
-            `⚠️ Position is out of range but cannot auto-reposition.\n\n` +
-            `Your subscription may have expired or hasn't been activated yet.\n\n` +
-            `🌐 **Renew Subscription:**\n` +
-            `Visit https://hypebiscus.com to subscribe ($4.99/month)\n\n` +
-            `📱 Use /status to check subscription details.`;
+          message = this.buildNoSubscriptionMessage(position);
           break;
-
         case 'subscription_check_failed':
-          message =
-            `⚠️ **Subscription Check Failed**\n\n` +
-            `🆔 Position: \`${position.positionId.substring(0, 8)}...\`\n` +
-            `❌ Could not verify subscription status.\n\n` +
-            `Error: ${error?.message || 'Unknown error'}\n\n` +
-            `🔄 The bot will retry on the next check.\n` +
-            `💡 If this persists, contact support.`;
+          message = this.buildSubscriptionCheckFailedMessage(position, error);
           break;
       }
 
+      // Send notification to user
       await this.bot.telegram.sendMessage(
         Number(telegramId),
         message,
         { parse_mode: 'Markdown' }
       );
-      
     } catch (error) {
       console.error('Failed to notify user:', error);
     }
