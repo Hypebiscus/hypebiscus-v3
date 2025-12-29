@@ -16,6 +16,13 @@ export class MonitoringService {
   private cronJob: cron.ScheduledTask | null = null;
   private isRunning = false;
 
+  // Notification throttling: Track last notification time per user/type
+  // Format: "telegramId:notificationType" -> timestamp
+  private lastNotificationTime: Map<string, number> = new Map();
+
+  // Throttle limits: 3 notifications per day = every 8 hours
+  private readonly NOTIFICATION_THROTTLE_MS = 8 * 60 * 60 * 1000; // 8 hours in milliseconds
+
   constructor(
     dlmmService: DlmmService,
     walletService: WalletService,
@@ -55,6 +62,38 @@ export class MonitoringService {
     this.cronJob = null;
     this.isRunning = false;
     console.log('✅ Monitoring service stopped');
+  }
+
+  /**
+   * Check if notification should be sent based on throttling rules
+   * Limits: 3 notifications per day = every 8 hours
+   */
+  private shouldSendNotification(
+    telegramId: bigint,
+    notificationType: 'no_subscription' | 'subscription_check_failed'
+  ): boolean {
+    const key = `${telegramId}:${notificationType}`;
+    const now = Date.now();
+    const lastSent = this.lastNotificationTime.get(key);
+
+    if (!lastSent) {
+      // First notification, always send
+      this.lastNotificationTime.set(key, now);
+      return true;
+    }
+
+    const timeSinceLastNotification = now - lastSent;
+
+    if (timeSinceLastNotification >= this.NOTIFICATION_THROTTLE_MS) {
+      // 8 hours have passed, send notification
+      this.lastNotificationTime.set(key, now);
+      return true;
+    }
+
+    // Still within throttle window, skip notification
+    const hoursRemaining = Math.ceil((this.NOTIFICATION_THROTTLE_MS - timeSinceLastNotification) / (60 * 60 * 1000));
+    console.log(`⏸️ Notification throttled for user ${telegramId} (${notificationType}). Next notification in ~${hoursRemaining}h`);
+    return false;
   }
 
   private async checkAllPositions(): Promise<void> {
@@ -393,6 +432,7 @@ export class MonitoringService {
 
   /**
    * IMPROVED: Notify user with PnL info + subscription notifications
+   * Now includes throttling for spam prevention (max 3 notifications per day for no_subscription/subscription_check_failed)
    */
   private async notifyUser(
     telegramId: bigint,
@@ -402,8 +442,17 @@ export class MonitoringService {
     error?: Error
   ): Promise<void> {
     try {
+      // Apply throttling for subscription-related notifications to prevent spam
+      // Limit: 3 notifications per day (every 8 hours)
+      if (type === 'no_subscription' || type === 'subscription_check_failed') {
+        if (!this.shouldSendNotification(telegramId, type)) {
+          // Notification throttled, skip sending
+          return;
+        }
+      }
+
       let message = '';
-      
+
       switch (type) {
         case 'starting':
           message = 
