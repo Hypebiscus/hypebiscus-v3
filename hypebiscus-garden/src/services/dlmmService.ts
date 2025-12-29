@@ -1,5 +1,6 @@
 import DLMM from '@meteora-ag/dlmm';
 import { Connection, PublicKey, Keypair, LAMPORTS_PER_SOL } from '@solana/web3.js';
+import { getAssociatedTokenAddress } from '@solana/spl-token';
 import { BN } from '@coral-xyz/anchor';
 import { StrategyType } from '@meteora-ag/dlmm';
 import { PoolStatus } from '../types';
@@ -160,6 +161,47 @@ export class DlmmService {
       zbtcAmount
     );
 
+    // ✅ POST-CREATION VERIFICATION: Ensure position actually has liquidity
+    console.log(`🔍 Verifying position has liquidity...`);
+    await new Promise(resolve => setTimeout(resolve, 3000)); // Wait for blockchain confirmation
+
+    try {
+      const positionPubkey = new PublicKey(positionId);
+      const position = await this.pool.getPosition(positionPubkey);
+
+      if (!position || !position.positionData) {
+        throw new Error(
+          `CRITICAL: Position ${positionId} was created but cannot be fetched! ` +
+          `Transaction may have failed partially.`
+        );
+      }
+
+      // Check if position has any liquidity in bins
+      const positionBinData = position.positionData.positionBinData || [];
+      const totalLiquidity = positionBinData.reduce((sum: number, bin: any) => {
+        return sum + (bin.positionXAmount || 0) + (bin.positionYAmount || 0);
+      }, 0);
+
+      if (totalLiquidity === 0 || positionBinData.length === 0) {
+        throw new Error(
+          `CRITICAL: Position ${positionId} was created but has ZERO liquidity! ` +
+          `This indicates the position account was created but liquidity add failed. ` +
+          `ZBTC (${zbtcAmount.toFixed(8)}) should still be in your wallet.`
+        );
+      }
+
+      console.log(`✅ Position verified: ${positionBinData.length} bins with liquidity`);
+      console.log(`💰 Total liquidity in position: ${totalLiquidity}`);
+
+    } catch (error: any) {
+      // If verification fails, we have a critical issue
+      console.error(`❌ Position verification failed:`, error.message);
+      throw new Error(
+        `Position creation verification failed: ${error.message}. ` +
+        `Position may exist but be empty. Check wallet and blockchain explorer.`
+      );
+    }
+
     return {
       positionId,
       entryPrice,
@@ -175,9 +217,47 @@ export class DlmmService {
     await this.initializePool();
     if (!this.pool) throw new Error('Pool not initialized');
 
+    // ✅ PRE-FLIGHT CHECK: Validate user actually has this amount
+    const zbtcMintAddress = process.env.ZBTC_MINT_ADDRESS;
+    if (!zbtcMintAddress) {
+      throw new Error('ZBTC_MINT_ADDRESS not configured in environment');
+    }
+
+    const zbtcMint = new PublicKey(zbtcMintAddress);
+    const zbtcTokenAccount = await getAssociatedTokenAddress(
+      zbtcMint,
+      userKeypair.publicKey
+    );
+
+    console.log(`🔍 Pre-flight: Validating ZBTC balance...`);
+    try {
+      const zbtcBalance = await this.connection.getTokenAccountBalance(zbtcTokenAccount);
+      const uiAmountString = zbtcBalance.value.uiAmount?.toString() || '0';
+      const actualBalance = parseFloat(uiAmountString);
+
+      console.log(`💰 Wallet has: ${actualBalance.toFixed(8)} ZBTC`);
+      console.log(`💰 Attempting to deposit: ${zbtcAmount.toFixed(8)} ZBTC`);
+
+      if (actualBalance < zbtcAmount) {
+        throw new Error(
+          `Insufficient ZBTC balance. Required: ${zbtcAmount.toFixed(8)}, Available: ${actualBalance.toFixed(8)}`
+        );
+      }
+
+      console.log(`✅ Balance check passed`);
+    } catch (error: any) {
+      if (error.message.includes('could not find account')) {
+        throw new Error(
+          `ZBTC token account not found for wallet ${userKeypair.publicKey.toString()}. ` +
+          `User may not have any ZBTC.`
+        );
+      }
+      throw error;
+    }
+
     let lastError: any;
     let lastActiveBinId: number | null = null;
-    
+
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
         console.log(`🎯 Creating position (attempt ${attempt}/${maxRetries})...`);
@@ -361,8 +441,6 @@ export class DlmmService {
   async repositionLiquidityWithTracking(
     userKeypair: Keypair,
     oldPositionId: string,
-    zbtcAmount: number,
-    solAmount: number,
     useMaxRange: boolean = true
   ): Promise<{
     positionId: string;
@@ -370,12 +448,13 @@ export class DlmmService {
     entryBin: number;
     exitPrice: number;
     exitBin: number;
+    actualZbtcDeposited: number;
   }> {
     try {
       console.log(`\n${'='.repeat(60)}`);
       console.log(`🔄 REPOSITIONING: ${oldPositionId.substring(0, 8)}...`);
       console.log(`${'='.repeat(60)}\n`);
-      
+
       if (!this.canReposition(oldPositionId)) {
         const lastTime = this.lastRepositionTime.get(oldPositionId)!;
         const timeSince = Date.now() - lastTime;
@@ -384,57 +463,93 @@ export class DlmmService {
           `Reposition on cooldown. Wait ${remainingSeconds}s.`
         );
       }
-      
+
       await this.initializePool();
       if (!this.pool) throw new Error('Pool not initialized');
-      
+
       const oldPositionPubkey = new PublicKey(oldPositionId);
       const oldPosition = await this.pool.getPosition(oldPositionPubkey);
-      
+
       if (!oldPosition) {
         throw new Error('Old position not found or already closed');
       }
-      
+
       console.log(`✅ Old position verified`);
-      
+
       const exitBinData = await this.pool.getActiveBin();
       const exitPrice = parseFloat(exitBinData.price);
       const exitBin = exitBinData.binId;
-      
+
       console.log(`📊 Exit: Bin ${exitBin}, Price $${exitPrice.toFixed(2)}`);
-      
+
       console.log(`\n🔴 CLOSING OLD POSITION...`);
       await this.closePosition(userKeypair, oldPositionId);
       console.log(`✅ Old position closed`);
-      
-      console.log(`⏳ Waiting 2s for liquidity to return...`);
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      
-      console.log(`\n🟢 CREATING NEW POSITION...`);
+
+      // ✅ FIX: Wait longer for blockchain confirmation and liquidity to settle
+      console.log(`⏳ Waiting 5s for liquidity to return and settle...`);
+      await new Promise(resolve => setTimeout(resolve, 5000));
+
+      // ✅ FIX: Get ACTUAL ZBTC balance from wallet
+      const zbtcMintAddress = process.env.ZBTC_MINT_ADDRESS;
+      if (!zbtcMintAddress) {
+        throw new Error('ZBTC_MINT_ADDRESS not configured in environment');
+      }
+
+      const zbtcMint = new PublicKey(zbtcMintAddress);
+      const zbtcTokenAccount = await getAssociatedTokenAddress(
+        zbtcMint,
+        userKeypair.publicKey
+      );
+
+      console.log(`🔍 Checking actual wallet balance...`);
+      const zbtcBalance = await this.connection.getTokenAccountBalance(zbtcTokenAccount);
+      const uiAmountString = zbtcBalance.value.uiAmount?.toString() || '0';
+      const actualZbtcAmount = parseFloat(uiAmountString);
+
+      console.log(`💰 Actual ZBTC in wallet: ${actualZbtcAmount.toFixed(8)} ZBTC`);
+
+      if (actualZbtcAmount === 0) {
+        throw new Error(
+          'CRITICAL: No ZBTC found in wallet after closing position! ' +
+          'Liquidity may not have been returned. Check blockchain explorer.'
+        );
+      }
+
+      if (actualZbtcAmount < 0.00000001) {
+        throw new Error(
+          `ZBTC amount too small: ${actualZbtcAmount}. ` +
+          `Minimum required is 0.00000001 ZBTC (1 satoshi).`
+        );
+      }
+
+      console.log(`\n🟢 CREATING NEW POSITION WITH ACTUAL BALANCE...`);
       const newPositionResult = await this.createPositionWithTracking(
         userKeypair,
-        zbtcAmount
+        actualZbtcAmount  // ✅ FIX: Use actual balance, not database value!
       );
-      
+
       this.recordReposition(newPositionResult.positionId);
-      
+
       console.log(`\n${'='.repeat(60)}`);
       console.log(`✅ REPOSITION COMPLETE`);
       console.log(`${'='.repeat(60)}`);
       console.log(`🔴 Old: ${oldPositionId.substring(0, 8)}...`);
       console.log(`🟢 New: ${newPositionResult.positionId.substring(0, 8)}...`);
+      console.log(`💰 Amount: ${actualZbtcAmount.toFixed(8)} ZBTC`);
       console.log(`📊 Exit: Bin ${exitBin}, Price $${exitPrice.toFixed(2)}`);
       console.log(`📊 Entry: Bin ${newPositionResult.entryBin}, Price $${newPositionResult.entryPrice.toFixed(2)}`);
       console.log(`${'='.repeat(60)}\n`);
-      
+
       return {
         positionId: newPositionResult.positionId,
         entryPrice: newPositionResult.entryPrice,
         entryBin: newPositionResult.entryBin,
         exitPrice,
-        exitBin
+        exitBin,
+        actualZbtcDeposited: actualZbtcAmount  // ✅ Return actual amount deposited
       };
-      
+
     } catch (error: any) {
       console.error(`\n❌ REPOSITION FAILED:`, error.message);
       throw error;
