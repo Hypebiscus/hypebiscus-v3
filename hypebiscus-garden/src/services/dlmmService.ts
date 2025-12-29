@@ -1,5 +1,6 @@
 import DLMM from '@meteora-ag/dlmm';
 import { Connection, PublicKey, Keypair, LAMPORTS_PER_SOL } from '@solana/web3.js';
+import { getAssociatedTokenAddress } from '@solana/spl-token';
 import { BN } from '@coral-xyz/anchor';
 import { StrategyType } from '@meteora-ag/dlmm';
 import { PoolStatus } from '../types';
@@ -160,11 +161,219 @@ export class DlmmService {
       zbtcAmount
     );
 
+    // ✅ POST-CREATION VERIFICATION: Ensure position actually has liquidity
+    console.log(`🔍 Verifying position has liquidity...`);
+    await new Promise(resolve => setTimeout(resolve, 3000)); // Wait for blockchain confirmation
+
+    try {
+      const positionPubkey = new PublicKey(positionId);
+      const position = await this.pool.getPosition(positionPubkey);
+
+      if (!position || !position.positionData) {
+        throw new Error(
+          `CRITICAL: Position ${positionId} was created but cannot be fetched! ` +
+          `Transaction may have failed partially.`
+        );
+      }
+
+      // Check if position has any liquidity in bins
+      const positionBinData = position.positionData.positionBinData || [];
+      const totalLiquidity = positionBinData.reduce((sum: number, bin: any) => {
+        return sum + (bin.positionXAmount || 0) + (bin.positionYAmount || 0);
+      }, 0);
+
+      if (totalLiquidity === 0 || positionBinData.length === 0) {
+        throw new Error(
+          `CRITICAL: Position ${positionId} was created but has ZERO liquidity! ` +
+          `This indicates the position account was created but liquidity add failed. ` +
+          `ZBTC (${zbtcAmount.toFixed(8)}) should still be in your wallet.`
+        );
+      }
+
+      console.log(`✅ Position verified: ${positionBinData.length} bins with liquidity`);
+      console.log(`💰 Total liquidity in position: ${totalLiquidity}`);
+
+    } catch (error: any) {
+      // If verification fails, we have a critical issue
+      console.error(`❌ Position verification failed:`, error.message);
+      throw new Error(
+        `Position creation verification failed: ${error.message}. ` +
+        `Position may exist but be empty. Check wallet and blockchain explorer.`
+      );
+    }
+
     return {
       positionId,
       entryPrice,
       entryBin
     };
+  }
+
+  /**
+   * Validate user has sufficient ZBTC balance before creating position
+   */
+  private async validateZbtcBalance(
+    userKeypair: Keypair,
+    zbtcAmount: number
+  ): Promise<void> {
+    const zbtcMintAddress = process.env.ZBTC_MINT_ADDRESS;
+    if (!zbtcMintAddress) {
+      throw new Error('ZBTC_MINT_ADDRESS not configured in environment');
+    }
+
+    const zbtcMint = new PublicKey(zbtcMintAddress);
+    const zbtcTokenAccount = await getAssociatedTokenAddress(
+      zbtcMint,
+      userKeypair.publicKey
+    );
+
+    console.log(`🔍 Pre-flight: Validating ZBTC balance...`);
+    try {
+      const zbtcBalance = await this.connection.getTokenAccountBalance(zbtcTokenAccount);
+      const uiAmountString = zbtcBalance.value.uiAmount?.toString() || '0';
+      const actualBalance = parseFloat(uiAmountString);
+
+      console.log(`💰 Wallet has: ${actualBalance.toFixed(8)} ZBTC`);
+      console.log(`💰 Attempting to deposit: ${zbtcAmount.toFixed(8)} ZBTC`);
+
+      if (actualBalance < zbtcAmount) {
+        throw new Error(
+          `Insufficient ZBTC balance. Required: ${zbtcAmount.toFixed(8)}, Available: ${actualBalance.toFixed(8)}`
+        );
+      }
+
+      console.log(`✅ Balance check passed`);
+    } catch (error: any) {
+      if (error.message.includes('could not find account')) {
+        throw new Error(
+          `ZBTC token account not found for wallet ${userKeypair.publicKey.toString()}. ` +
+          `User may not have any ZBTC.`
+        );
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * Check if bin is moving rapidly and wait for stabilization
+   */
+  private async waitForBinStabilization(
+    activeBinId: number,
+    lastActiveBinId: number | null
+  ): Promise<boolean> {
+    if (lastActiveBinId !== null && Math.abs(activeBinId - lastActiveBinId) > 2) {
+      console.log(`⚠️ Bin moving rapidly: ${lastActiveBinId} → ${activeBinId}`);
+      console.log(`💤 Waiting 3s for market stabilization...`);
+      await new Promise(resolve => setTimeout(resolve, 3000));
+      return true; // Need to skip this attempt
+    }
+    return false; // Proceed with position creation
+  }
+
+  /**
+   * Determine if error is retryable and handle retry logic
+   */
+  private async handleRetryableError(
+    error: any,
+    attempt: number,
+    maxRetries: number
+  ): Promise<boolean> {
+    const errorMessage = error?.message || String(error);
+    const errorLogs = error?.transactionLogs?.join('\n') || '';
+
+    const isSlippageError =
+      errorMessage.toLowerCase().includes('slippage') ||
+      errorMessage.toLowerCase().includes('price moved') ||
+      errorLogs.includes('ExceededBinSlippageTolerance') ||
+      errorLogs.includes('6004');
+
+    const isBlockHeightError =
+      errorMessage.includes('block height exceeded') ||
+      errorMessage.includes('BlockheightExceeded');
+
+    if (isSlippageError || isBlockHeightError) {
+      console.log(`⚠️ Attempt ${attempt} failed: ${
+        isSlippageError ? 'Slippage' : 'Block height'
+      } error`);
+
+      if (attempt < maxRetries) {
+        const delay = attempt <= 3 ? attempt * 1000 : attempt * 1500;
+        console.log(`💤 Waiting ${delay/1000}s before retry...`);
+        await new Promise(resolve => setTimeout(resolve, delay));
+        return true; // Should retry
+      }
+    }
+
+    return false; // Not retryable or out of retries
+  }
+
+  /**
+   * Execute single position creation attempt
+   */
+  private async executePositionCreation(
+    userKeypair: Keypair,
+    zbtcAmount: number,
+    attempt: number
+  ): Promise<string> {
+    if (!this.pool) throw new Error('Pool not initialized');
+
+    const activeBin = await this.pool.getActiveBin();
+    console.log(`📊 Active Bin: ${activeBin.binId} at price ${activeBin.price}`);
+
+    const positionKeypair = Keypair.generate();
+
+    const minBinId = activeBin.binId;
+    const maxBinId = activeBin.binId + 68;
+
+    const totalXAmount = new BN(zbtcAmount * Math.pow(10, 8));
+    const totalYAmount = new BN(0);
+
+    console.log(`🎯 Full range position:`);
+    console.log(`   Min bin: ${minBinId} (current price)`);
+    console.log(`   Max bin: ${maxBinId}`);
+    console.log(`   Total bins: ${maxBinId - minBinId + 1}`);
+
+    const { blockhash, lastValidBlockHeight } =
+      await this.connection.getLatestBlockhash('confirmed');
+    console.log(`🔗 Fresh blockhash: ${blockhash.substring(0, 8)}...`);
+
+    const createPositionTx = await this.pool.initializePositionAndAddLiquidityByStrategy({
+      positionPubKey: positionKeypair.publicKey,
+      user: userKeypair.publicKey,
+      totalXAmount,
+      totalYAmount,
+      strategy: {
+        maxBinId,
+        minBinId,
+        strategyType: StrategyType.BidAsk
+      },
+      slippage: 1000
+    });
+
+    console.log('ℹ️ Using Meteora SDK default priority fees');
+
+    createPositionTx.recentBlockhash = blockhash;
+    createPositionTx.feePayer = userKeypair.publicKey;
+    createPositionTx.sign(userKeypair, positionKeypair);
+
+    const rawTransaction = createPositionTx.serialize();
+
+    console.log(`📤 Sending transaction...`);
+
+    const signature = await this.sendAndConfirmWithRetry(
+      rawTransaction,
+      blockhash,
+      lastValidBlockHeight,
+      attempt
+    );
+
+    const positionId = positionKeypair.publicKey.toString();
+    console.log(`✅ Position created: ${positionId}`);
+    console.log(`📊 Range: ${maxBinId - minBinId + 1} bins (${minBinId}-${maxBinId})`);
+    console.log(`🛡️ Buffer zone: ±${BUFFER_BINS} bins`);
+    console.log(`📝 Tx: ${signature}`);
+
+    return positionId;
   }
 
   async createPosition(
@@ -175,114 +384,49 @@ export class DlmmService {
     await this.initializePool();
     if (!this.pool) throw new Error('Pool not initialized');
 
+    // Pre-flight balance validation
+    await this.validateZbtcBalance(userKeypair, zbtcAmount);
+
     let lastError: any;
     let lastActiveBinId: number | null = null;
-    
+
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
         console.log(`🎯 Creating position (attempt ${attempt}/${maxRetries})...`);
-        
+
         const activeBin = await this.pool.getActiveBin();
-        console.log(`📊 Active Bin: ${activeBin.binId} at price ${activeBin.price}`);
-        
-        if (lastActiveBinId !== null && Math.abs(activeBin.binId - lastActiveBinId) > 2) {
-          console.log(`⚠️ Bin moving rapidly: ${lastActiveBinId} → ${activeBin.binId}`);
-          console.log(`💤 Waiting 3s for market stabilization...`);
-          await new Promise(resolve => setTimeout(resolve, 3000));
+
+        // Check for bin stabilization
+        const shouldSkip = await this.waitForBinStabilization(
+          activeBin.binId,
+          lastActiveBinId
+        );
+
+        if (shouldSkip) {
           lastActiveBinId = activeBin.binId;
           continue;
         }
+
         lastActiveBinId = activeBin.binId;
-        
-        const positionKeypair = Keypair.generate();
-        
-        const minBinId = activeBin.binId;
-        const maxBinId = activeBin.binId + 68;
-        
-        const totalXAmount = new BN(zbtcAmount * Math.pow(10, 8));
-        const totalYAmount = new BN(0);
-        
-        console.log(`🎯 Full range position:`);
-        console.log(`   Min bin: ${minBinId} (current price)`);
-        console.log(`   Max bin: ${maxBinId}`);
-        console.log(`   Total bins: ${maxBinId - minBinId + 1}`);
-        
-        const { blockhash, lastValidBlockHeight } = 
-          await this.connection.getLatestBlockhash('confirmed');
-        console.log(`🔗 Fresh blockhash: ${blockhash.substring(0, 8)}...`);
-        
-        const createPositionTx = await this.pool.initializePositionAndAddLiquidityByStrategy({
-          positionPubKey: positionKeypair.publicKey,
-          user: userKeypair.publicKey,
-          totalXAmount,
-          totalYAmount,
-          strategy: {
-            maxBinId,
-            minBinId,
-            strategyType: StrategyType.BidAsk
-          },
-          slippage: 1000
-        });
 
-        // Meteora SDK already adds optimal ComputeBudget instructions
-        // We don't need to add our own - let the SDK handle it
-        console.log('ℹ️ Using Meteora SDK default priority fees');
+        // Execute position creation
+        return await this.executePositionCreation(userKeypair, zbtcAmount, attempt);
 
-        createPositionTx.recentBlockhash = blockhash;
-        createPositionTx.feePayer = userKeypair.publicKey;
-        createPositionTx.sign(userKeypair, positionKeypair);
-        
-        const rawTransaction = createPositionTx.serialize();
-        
-        console.log(`📤 Sending transaction...`);
-        
-        const signature = await this.sendAndConfirmWithRetry(
-          rawTransaction,
-          blockhash,
-          lastValidBlockHeight,
-          attempt
-        );
-
-        console.log(`✅ Position created: ${positionKeypair.publicKey.toString()}`);
-        console.log(`📊 Range: ${maxBinId - minBinId + 1} bins (${minBinId}-${maxBinId})`);
-        console.log(`🛡️ Buffer zone: ±${BUFFER_BINS} bins`);
-        console.log(`📝 Tx: ${signature}`);
-        
-        return positionKeypair.publicKey.toString();
-        
       } catch (error: any) {
         lastError = error;
-        const errorMessage = error?.message || String(error);
-        const errorLogs = error?.transactionLogs?.join('\n') || '';
-        
-        const isSlippageError = 
-          errorMessage.toLowerCase().includes('slippage') ||
-          errorMessage.toLowerCase().includes('price moved') ||
-          errorLogs.includes('ExceededBinSlippageTolerance') ||
-          errorLogs.includes('6004');
-        
-        const isBlockHeightError = 
-          errorMessage.includes('block height exceeded') ||
-          errorMessage.includes('BlockheightExceeded');
-        
-        if (isSlippageError || isBlockHeightError) {
-          console.log(`⚠️ Attempt ${attempt} failed: ${
-            isSlippageError ? 'Slippage' : 'Block height'
-          } error`);
-          
-          if (attempt < maxRetries) {
-            const delay = attempt <= 3 ? attempt * 1000 : attempt * 1500;
-            console.log(`💤 Waiting ${delay/1000}s before retry...`);
-            await new Promise(resolve => setTimeout(resolve, delay));
-            continue;
-          }
+
+        // Handle retryable errors
+        const shouldRetry = await this.handleRetryableError(error, attempt, maxRetries);
+
+        if (shouldRetry) {
+          continue;
         }
-        
+
         console.error('❌ Failed to create position:', error);
         throw error;
       }
     }
-    
+
     throw new Error(
       `Failed after ${maxRetries} attempts. Market too volatile.`
     );
@@ -361,8 +505,6 @@ export class DlmmService {
   async repositionLiquidityWithTracking(
     userKeypair: Keypair,
     oldPositionId: string,
-    zbtcAmount: number,
-    solAmount: number,
     useMaxRange: boolean = true
   ): Promise<{
     positionId: string;
@@ -370,12 +512,13 @@ export class DlmmService {
     entryBin: number;
     exitPrice: number;
     exitBin: number;
+    actualZbtcDeposited: number;
   }> {
     try {
       console.log(`\n${'='.repeat(60)}`);
       console.log(`🔄 REPOSITIONING: ${oldPositionId.substring(0, 8)}...`);
       console.log(`${'='.repeat(60)}\n`);
-      
+
       if (!this.canReposition(oldPositionId)) {
         const lastTime = this.lastRepositionTime.get(oldPositionId)!;
         const timeSince = Date.now() - lastTime;
@@ -384,57 +527,93 @@ export class DlmmService {
           `Reposition on cooldown. Wait ${remainingSeconds}s.`
         );
       }
-      
+
       await this.initializePool();
       if (!this.pool) throw new Error('Pool not initialized');
-      
+
       const oldPositionPubkey = new PublicKey(oldPositionId);
       const oldPosition = await this.pool.getPosition(oldPositionPubkey);
-      
+
       if (!oldPosition) {
         throw new Error('Old position not found or already closed');
       }
-      
+
       console.log(`✅ Old position verified`);
-      
+
       const exitBinData = await this.pool.getActiveBin();
       const exitPrice = parseFloat(exitBinData.price);
       const exitBin = exitBinData.binId;
-      
+
       console.log(`📊 Exit: Bin ${exitBin}, Price $${exitPrice.toFixed(2)}`);
-      
+
       console.log(`\n🔴 CLOSING OLD POSITION...`);
       await this.closePosition(userKeypair, oldPositionId);
       console.log(`✅ Old position closed`);
-      
-      console.log(`⏳ Waiting 2s for liquidity to return...`);
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      
-      console.log(`\n🟢 CREATING NEW POSITION...`);
+
+      // ✅ FIX: Wait longer for blockchain confirmation and liquidity to settle
+      console.log(`⏳ Waiting 5s for liquidity to return and settle...`);
+      await new Promise(resolve => setTimeout(resolve, 5000));
+
+      // ✅ FIX: Get ACTUAL ZBTC balance from wallet
+      const zbtcMintAddress = process.env.ZBTC_MINT_ADDRESS;
+      if (!zbtcMintAddress) {
+        throw new Error('ZBTC_MINT_ADDRESS not configured in environment');
+      }
+
+      const zbtcMint = new PublicKey(zbtcMintAddress);
+      const zbtcTokenAccount = await getAssociatedTokenAddress(
+        zbtcMint,
+        userKeypair.publicKey
+      );
+
+      console.log(`🔍 Checking actual wallet balance...`);
+      const zbtcBalance = await this.connection.getTokenAccountBalance(zbtcTokenAccount);
+      const uiAmountString = zbtcBalance.value.uiAmount?.toString() || '0';
+      const actualZbtcAmount = parseFloat(uiAmountString);
+
+      console.log(`💰 Actual ZBTC in wallet: ${actualZbtcAmount.toFixed(8)} ZBTC`);
+
+      if (actualZbtcAmount === 0) {
+        throw new Error(
+          'CRITICAL: No ZBTC found in wallet after closing position! ' +
+          'Liquidity may not have been returned. Check blockchain explorer.'
+        );
+      }
+
+      if (actualZbtcAmount < 0.00000001) {
+        throw new Error(
+          `ZBTC amount too small: ${actualZbtcAmount}. ` +
+          `Minimum required is 0.00000001 ZBTC (1 satoshi).`
+        );
+      }
+
+      console.log(`\n🟢 CREATING NEW POSITION WITH ACTUAL BALANCE...`);
       const newPositionResult = await this.createPositionWithTracking(
         userKeypair,
-        zbtcAmount
+        actualZbtcAmount  // ✅ FIX: Use actual balance, not database value!
       );
-      
+
       this.recordReposition(newPositionResult.positionId);
-      
+
       console.log(`\n${'='.repeat(60)}`);
       console.log(`✅ REPOSITION COMPLETE`);
       console.log(`${'='.repeat(60)}`);
       console.log(`🔴 Old: ${oldPositionId.substring(0, 8)}...`);
       console.log(`🟢 New: ${newPositionResult.positionId.substring(0, 8)}...`);
+      console.log(`💰 Amount: ${actualZbtcAmount.toFixed(8)} ZBTC`);
       console.log(`📊 Exit: Bin ${exitBin}, Price $${exitPrice.toFixed(2)}`);
       console.log(`📊 Entry: Bin ${newPositionResult.entryBin}, Price $${newPositionResult.entryPrice.toFixed(2)}`);
       console.log(`${'='.repeat(60)}\n`);
-      
+
       return {
         positionId: newPositionResult.positionId,
         entryPrice: newPositionResult.entryPrice,
         entryBin: newPositionResult.entryBin,
         exitPrice,
-        exitBin
+        exitBin,
+        actualZbtcDeposited: actualZbtcAmount  // ✅ Return actual amount deposited
       };
-      
+
     } catch (error: any) {
       console.error(`\n❌ REPOSITION FAILED:`, error.message);
       throw error;

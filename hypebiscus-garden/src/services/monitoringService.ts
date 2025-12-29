@@ -257,12 +257,11 @@ export class MonitoringService {
     console.log(`💰 Balance before: ${balanceBefore.zbtc.toFixed(8)} ZBTC, ${balanceBefore.sol.toFixed(6)} SOL`);
 
     // Execute reposition with tracking
+    // Note: No longer passing amounts - dlmmService will fetch actual wallet balance
     console.log(`🔄 Executing reposition with tracking...`);
     const repositionResult = await this.dlmmService.repositionLiquidityWithTracking(
       keypair,
-      position.positionId,
-      Number(position.zbtcAmount),
-      Number(position.solAmount)
+      position.positionId
     );
 
     // Get balance AFTER reposition
@@ -295,16 +294,20 @@ export class MonitoringService {
       sol: balanceAfter.sol - balanceBefore.sol
     };
 
-    const zbtcReturned = Number(position.zbtcAmount) + balanceChange.zbtc;
+    // ✅ FIX: Use actual amount that was deposited into new position
+    const actualZbtcDeposited = repositionResult.actualZbtcDeposited;
+    const zbtcReturned = balanceBefore.zbtc + (balanceAfter.zbtc - balanceBefore.zbtc) + actualZbtcDeposited;
     const solReturned = Number(position.solAmount) + balanceChange.sol;
 
     console.log(`📊 Returned from closed position:`);
-    console.log(`   ZBTC: ${zbtcReturned.toFixed(8)}`);
+    console.log(`   ZBTC: ${zbtcReturned.toFixed(8)} (includes fees)`);
     console.log(`   SOL: ${solReturned.toFixed(6)}`);
+    console.log(`📊 Deposited into new position:`);
+    console.log(`   ZBTC: ${actualZbtcDeposited.toFixed(8)} (actual from wallet)`);
 
-    const newSolUsed = Number(position.solAmount) - balanceChange.sol;
+    const newSolUsed = 0; // One-sided liquidity (ZBTC only)
 
-    // Update database with full tracking
+    // Update database with full tracking using ACTUAL amounts
     await this.updateDatabaseAfterReposition(
       user.id,
       position.positionId,
@@ -313,7 +316,7 @@ export class MonitoringService {
       solReturned,
       repositionResult.exitPrice,
       repositionResult.exitBin,
-      Number(position.zbtcAmount),
+      actualZbtcDeposited,  // ✅ FIX: Use actual deposited amount
       newSolUsed,
       repositionResult.entryPrice,
       repositionResult.entryBin
