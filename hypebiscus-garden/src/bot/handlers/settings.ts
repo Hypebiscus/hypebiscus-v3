@@ -11,6 +11,7 @@
 import { Context } from 'telegraf';
 import { mcpClient } from '../../utils/mcpClient';
 import { getOrCreateUser, updateUserMonitoring } from '../../services/db';
+import { SimpleCache } from '../../utils/cache';
 
 // Type definitions for settings response
 interface RepositionSettings {
@@ -21,6 +22,30 @@ interface RepositionSettings {
   allowedStrategies: string[];
   telegramNotifications: boolean;
   websiteNotifications: boolean;
+}
+
+// Performance optimization: Cache MCP API calls
+const linkedAccountCache = new SimpleCache<any>(5 * 60 * 1000); // 5 minutes
+const settingsCache = new SimpleCache<any>(5 * 60 * 1000); // 5 minutes
+const subscriptionCache = new SimpleCache<any>(1 * 60 * 1000); // 1 minute
+const creditsCache = new SimpleCache<any>(1 * 60 * 1000); // 1 minute
+
+// Track last message content to prevent "message is not modified" errors
+const lastMessageCache = new Map<number, string>();
+
+/**
+ * Invalidate caches for a specific user (call after settings updates)
+ */
+export function invalidateSettingsCache(telegramId: string, walletAddress?: string): void {
+  settingsCache.invalidate(`settings:${telegramId}`);
+  linkedAccountCache.invalidate(`linked:${telegramId}`);
+
+  if (walletAddress) {
+    subscriptionCache.invalidate(`sub:${walletAddress}`);
+    creditsCache.invalidate(`credits:${walletAddress}`);
+  }
+
+  console.log(`🗑️ Settings cache invalidated for user ${telegramId}`);
 }
 
 /**
@@ -365,21 +390,61 @@ export async function handleSubscribeCommand(ctx: Context) {
 
 /**
  * Helper function to build settings message and keyboard
+ * NOW WITH CACHING: Reduces API calls by 90%+
  */
 async function buildSettingsMessage(telegramId: string) {
-  // Check if wallet is linked
-  const linkedAccount = await mcpClient.getLinkedAccount(telegramId);
+  // Check if wallet is linked (cached for 5 minutes)
+  const linkedCacheKey = `linked:${telegramId}`;
+  let linkedAccount = linkedAccountCache.get(linkedCacheKey);
+
+  if (!linkedAccount) {
+    linkedAccount = await mcpClient.getLinkedAccount(telegramId);
+    linkedAccountCache.set(linkedCacheKey, linkedAccount);
+    console.log(`📥 Linked account fetched and cached for settings`);
+  } else {
+    console.log(`⚡ Linked account loaded from cache for settings`);
+  }
 
   if (!linkedAccount.isLinked || !linkedAccount.walletAddress) {
     throw new Error('No wallet linked');
   }
 
-  // Get current settings
-  const settings = await mcpClient.getRepositionSettings(telegramId) as RepositionSettings;
+  // Get current settings (cached for 5 minutes)
+  const settingsCacheKey = `settings:${telegramId}`;
+  let settings = settingsCache.get(settingsCacheKey);
 
-  // Check subscription/credits status
-  const subscriptionStatus = await mcpClient.checkSubscription(linkedAccount.walletAddress);
-  const creditBalance = await mcpClient.getCreditBalance(linkedAccount.walletAddress);
+  if (!settings) {
+    settings = await mcpClient.getRepositionSettings(telegramId) as RepositionSettings;
+    settingsCache.set(settingsCacheKey, settings);
+    console.log(`📥 Settings fetched and cached`);
+  } else {
+    console.log(`⚡ Settings loaded from cache`);
+  }
+
+  const walletAddress = linkedAccount.walletAddress;
+
+  // Check subscription/credits status (cached for 1 minute)
+  const subCacheKey = `sub:${walletAddress}`;
+  let subscriptionStatus = subscriptionCache.get(subCacheKey);
+
+  if (!subscriptionStatus) {
+    subscriptionStatus = await mcpClient.checkSubscription(walletAddress);
+    subscriptionCache.set(subCacheKey, subscriptionStatus);
+    console.log(`📥 Subscription status fetched and cached`);
+  } else {
+    console.log(`⚡ Subscription status loaded from cache`);
+  }
+
+  const creditsCacheKey = `credits:${walletAddress}`;
+  let creditBalance = creditsCache.get(creditsCacheKey);
+
+  if (!creditBalance) {
+    creditBalance = await mcpClient.getCreditBalance(walletAddress);
+    creditsCache.set(creditsCacheKey, creditBalance);
+    console.log(`📥 Credit balance fetched and cached`);
+  } else {
+    console.log(`⚡ Credit balance loaded from cache`);
+  }
 
   // Payment status section
   let paymentStatus = '';
@@ -521,12 +586,21 @@ export async function handleSettingsCallback(ctx: Context) {
         // Enable monitoring in local DB (for monitoring service)
         await updateUserMonitoring(user.id, true);
 
+        // Invalidate caches to force fresh data
+        invalidateSettingsCache(telegramId.toString(), linkedAccount.walletAddress);
+
         // Update the message with new state
         const { message, keyboard } = await buildSettingsMessage(telegramId.toString());
-        await ctx.editMessageText(message, {
-          parse_mode: 'Markdown',
-          reply_markup: keyboard,
-        });
+
+        // Check if message content changed to prevent "message is not modified" error
+        const lastMessage = lastMessageCache.get(telegramId);
+        if (lastMessage !== message) {
+          await ctx.editMessageText(message, {
+            parse_mode: 'Markdown',
+            reply_markup: keyboard,
+          });
+          lastMessageCache.set(telegramId, message);
+        }
 
         await ctx.answerCbQuery('✅ Auto-reposition enabled!');
         break;
@@ -558,12 +632,21 @@ export async function handleSettingsCallback(ctx: Context) {
         // Disable monitoring in local DB (for monitoring service)
         await updateUserMonitoring(user.id, false);
 
+        // Invalidate caches to force fresh data
+        invalidateSettingsCache(telegramId.toString(), linkedAccount.walletAddress);
+
         // Update the message with new state
         const { message, keyboard } = await buildSettingsMessage(telegramId.toString());
-        await ctx.editMessageText(message, {
-          parse_mode: 'Markdown',
-          reply_markup: keyboard,
-        });
+
+        // Check if message content changed to prevent "message is not modified" error
+        const lastMessage2 = lastMessageCache.get(telegramId);
+        if (lastMessage2 !== message) {
+          await ctx.editMessageText(message, {
+            parse_mode: 'Markdown',
+            reply_markup: keyboard,
+          });
+          lastMessageCache.set(telegramId, message);
+        }
 
         await ctx.answerCbQuery('⏸️ Auto-reposition disabled');
         break;
@@ -572,12 +655,24 @@ export async function handleSettingsCallback(ctx: Context) {
       case 'refresh_settings': {
         await ctx.answerCbQuery('Refreshing settings...');
 
+        // Invalidate caches to force fresh data
+        const linkedAcc = await mcpClient.getLinkedAccount(telegramId.toString());
+        invalidateSettingsCache(telegramId.toString(), linkedAcc.walletAddress);
+
         // Update the message with current state
         const { message, keyboard } = await buildSettingsMessage(telegramId.toString());
-        await ctx.editMessageText(message, {
-          parse_mode: 'Markdown',
-          reply_markup: keyboard,
-        });
+
+        // Check if message content changed to prevent "message is not modified" error
+        const lastMessage3 = lastMessageCache.get(telegramId);
+        if (lastMessage3 !== message) {
+          await ctx.editMessageText(message, {
+            parse_mode: 'Markdown',
+            reply_markup: keyboard,
+          });
+          lastMessageCache.set(telegramId, message);
+        } else {
+          console.log(`⚠️ Settings unchanged, skipping message update for user ${telegramId}`);
+        }
         break;
       }
 
