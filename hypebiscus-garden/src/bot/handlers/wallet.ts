@@ -4,6 +4,7 @@ import { WalletService } from '../../services/walletService';
 import { getOrCreateUser } from '../../services/db';
 import { walletKeyboard, backKeyboard } from '../keyboards';
 import { PrivateKeyParser } from '../../utils/privateKeyParser';
+import { safeEditMessageText } from '../../utils/telegramHelpers';
 
 export class WalletHandler {
   constructor(
@@ -29,7 +30,8 @@ export class WalletHandler {
 
       // Check if user has wallet
       if (!user.wallet) {
-        await ctx.editMessageText(
+        await safeEditMessageText(
+          ctx,
           '❌ No wallet found. Create or import a wallet first.',
           walletKeyboard
         );
@@ -38,23 +40,25 @@ export class WalletHandler {
 
       // Get balance
       const balance = await this.walletService.getBalance(user.id);
-      const balanceText = balance 
+      const balanceText = balance
         ? `💰 SOL: ${balance.sol.toFixed(4)}\n💰 ZBTC: ${balance.zbtc.toFixed(6)}`
         : '❌ Failed to fetch balance';
 
-      await ctx.editMessageText(
+      await safeEditMessageText(
+        ctx,
         `👛 **Wallet Info**\n\n` +
         `📍 Address:\n\`${user.wallet.publicKey}\`\n\n` +
         `${balanceText}\n\n` +
         `Choose an option below:`,
-        { 
+        {
           parse_mode: 'Markdown',
           ...walletKeyboard  // Changed from backKeyboard to walletKeyboard
         }
       );
     } catch (error) {
       console.error('Error getting wallet info:', error);
-      await ctx.editMessageText(
+      await safeEditMessageText(
+        ctx,
         '❌ Failed to get wallet info. Try again.',
         backKeyboard
       );
@@ -79,7 +83,8 @@ export class WalletHandler {
 
       // Check if user already has wallet
       if (user.wallet) {
-        await ctx.editMessageText(
+        await safeEditMessageText(
+          ctx,
           '⚠️ You already have a wallet!\n\nUse "Wallet Info" to view it.',
           backKeyboard
         );
@@ -88,15 +93,16 @@ export class WalletHandler {
 
       // Create wallet (automatically saves to database)
       const wallet = await this.walletService.createWallet(user.id);
-      
-      await ctx.editMessageText(
+
+      await safeEditMessageText(
+        ctx,
         `✅ **Wallet Created!**\n\n` +
         `📍 **Address:**\n\`${wallet.publicKey}\`\n\n` +
         `🔐 Your private key will be sent next.\n` +
         `💰 Fund with SOL + ZBTC to start trading.`,
-        { 
+        {
           parse_mode: 'Markdown',
-          ...backKeyboard 
+          ...backKeyboard
         }
       );
       
@@ -122,14 +128,16 @@ export class WalletHandler {
       console.log(`✅ Wallet created for user ${telegramId}: ${wallet.publicKey}`);
     } catch (error: any) {
       console.error('Error creating wallet:', error);
-      
+
       if (error.message === 'User already has a wallet') {
-        await ctx.editMessageText(
+        await safeEditMessageText(
+          ctx,
           '⚠️ You already have a wallet!',
           backKeyboard
         );
       } else {
-        await ctx.editMessageText(
+        await safeEditMessageText(
+          ctx,
           '❌ Failed to create wallet. Please try again.',
           backKeyboard
         );
@@ -155,7 +163,8 @@ export class WalletHandler {
 
       // Check if user already has wallet
       if (user.wallet) {
-        await ctx.editMessageText(
+        await safeEditMessageText(
+          ctx,
           '⚠️ You already have a wallet!\n\n' +
           'You cannot import another wallet. Use your existing wallet or create a new account.',
           backKeyboard
@@ -163,7 +172,8 @@ export class WalletHandler {
         return;
       }
 
-      await ctx.editMessageText(
+      await safeEditMessageText(
+        ctx,
         `📥 **Import Wallet**\n\n` +
         `Send your private key in ANY of these formats:\n\n` +
         PrivateKeyParser.getFormatExamples() + `\n\n` +
@@ -184,7 +194,8 @@ export class WalletHandler {
       session.userId = user.id;
     } catch (error) {
       console.error('Error in import wallet:', error);
-      await ctx.editMessageText(
+      await safeEditMessageText(
+        ctx,
         '❌ Failed to start import process. Try again.',
         backKeyboard
       );
@@ -278,12 +289,13 @@ export class WalletHandler {
       );
 
       if (!user.wallet) {
-        await ctx.editMessageText('❌ No wallet found.', backKeyboard);
+        await safeEditMessageText(ctx, '❌ No wallet found.', backKeyboard);
         return;
       }
 
       // Send warning with user ID in callback data
-      await ctx.editMessageText(
+      await safeEditMessageText(
+        ctx,
         '⚠️ **WARNING**\n\n' +
         'You are about to view your private key.\n' +
         'Anyone with this key can steal your funds!\n\n' +
@@ -303,7 +315,7 @@ export class WalletHandler {
 
     } catch (error) {
       console.error('Error exporting private key:', error);
-      await ctx.editMessageText('❌ Failed to export private key.', backKeyboard);
+      await safeEditMessageText(ctx, '❌ Failed to export private key.', backKeyboard);
     }
   }
 
@@ -314,9 +326,9 @@ export class WalletHandler {
     try {
       // Export private key directly from database
       const privateKeyJson = await this.walletService.exportPrivateKey(userId);
-      
+
       if (!privateKeyJson) {
-        await ctx.editMessageText('❌ Failed to export private key.', backKeyboard);
+        await safeEditMessageText(ctx, '❌ Failed to export private key.', backKeyboard);
         return;
       }
 
@@ -327,7 +339,8 @@ export class WalletHandler {
 
       // Send private key with delete button
       const { Markup } = await import('telegraf');
-      await ctx.editMessageText(
+      await safeEditMessageText(
+        ctx,
         '🔐 **Secret Recovery Key**\n\n' +
         `\`${privateKeyBase58}\`\n\n` +
         '⚠️ **IMPORTANT:**\n' +
@@ -347,7 +360,7 @@ export class WalletHandler {
       console.log(`⚠️ User ${ctx.from?.id} exported their private key`);
     } catch (error) {
       console.error('Error in confirm export:', error);
-      await ctx.editMessageText('❌ Failed to export private key.', backKeyboard);
+      await safeEditMessageText(ctx, '❌ Failed to export private key.', backKeyboard);
     }
   }
 
@@ -368,18 +381,20 @@ export class WalletHandler {
 
       const hasWallet = !!user.wallet;
 
-      await ctx.editMessageText(
+      await safeEditMessageText(
+        ctx,
         `👛 **Wallet Management**\n\n` +
         `${hasWallet ? '✅ You have a wallet' : '❌ No wallet found'}\n\n` +
         `Choose an option below:`,
-        { 
+        {
           parse_mode: 'Markdown',
-          ...walletKeyboard 
+          ...walletKeyboard
         }
       );
     } catch (error) {
       console.error('Error showing wallet menu:', error);
-      await ctx.editMessageText(
+      await safeEditMessageText(
+        ctx,
         '👛 **Wallet Management**\n\nChoose an option:',
         walletKeyboard
       );

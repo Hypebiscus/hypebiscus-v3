@@ -35,6 +35,7 @@ import {
 import { mainKeyboard, backKeyboard, helpKeyboard } from './keyboards';
 import { getOrCreateUser, getActivePositions } from '../services/db';
 import { safeLogUserInput } from '../utils/secureLogging';
+import { safeEditMessageText } from '../utils/telegramHelpers';
 
 export class TelegramBot {
   private bot: Telegraf;
@@ -247,8 +248,9 @@ export class TelegramBot {
     // Photo handler for QR code scanning
     this.bot.on('photo', handleQRCodePhoto);
 
-    this.bot.action('main_menu', (ctx) => {
-      ctx.editMessageText(
+    this.bot.action('main_menu', async (ctx) => {
+      await safeEditMessageText(
+        ctx,
         '🏠 **Main Menu**\n\nChoose an option:',
         { parse_mode: 'Markdown', ...mainKeyboard }
       );
@@ -320,7 +322,8 @@ export class TelegramBot {
     this.bot.action('pool_status', async (ctx) => {
       try {
         const poolStatus = await this.dlmmService.getPoolStatus();
-        ctx.editMessageText(
+        await safeEditMessageText(
+          ctx,
           `📈 **ZBTC-SOL Pool Status**\n\n` +
           `💰 Current Price: ${poolStatus.currentPrice.toFixed(6)}\n` +
           `🆔 Active Bin ID: ${poolStatus.activeBinId}\n` +
@@ -331,7 +334,8 @@ export class TelegramBot {
         );
       } catch (error) {
         console.error('Error getting pool status:', error);
-        ctx.editMessageText(
+        await safeEditMessageText(
+          ctx,
           '❌ Failed to fetch pool status. Try again later.',
           backKeyboard
         );
@@ -352,8 +356,9 @@ export class TelegramBot {
     });
 
     // Help category handlers
-    this.bot.action('help_wallet', (ctx) => {
-      ctx.editMessageText(
+    this.bot.action('help_wallet', async (ctx) => {
+      await safeEditMessageText(
+        ctx,
         `👛 **Wallet Commands**\n\n` +
         `**/balance** - Check wallet balance\n` +
         `**Wallet Info** button - View wallet details\n` +
@@ -370,8 +375,9 @@ export class TelegramBot {
       );
     });
 
-    this.bot.action('help_positions', (ctx) => {
-      ctx.editMessageText(
+    this.bot.action('help_positions', async (ctx) => {
+      await safeEditMessageText(
+        ctx,
         `💼 **Position Commands**\n\n` +
         `**Create Position** - Open new DLMM position\n` +
         `**View Positions** - See active positions\n` +
@@ -387,8 +393,9 @@ export class TelegramBot {
       );
     });
 
-    this.bot.action('help_settings', (ctx) => {
-      ctx.editMessageText(
+    this.bot.action('help_settings', async (ctx) => {
+      await safeEditMessageText(
+        ctx,
         `⚙️ **Settings & Auto-Reposition**\n\n` +
         `**/settings** - View/edit all settings\n` +
         `**/enableauto** - Enable auto-repositioning\n` +
@@ -406,8 +413,9 @@ export class TelegramBot {
       );
     });
 
-    this.bot.action('help_payment', (ctx) => {
-      ctx.editMessageText(
+    this.bot.action('help_payment', async (ctx) => {
+      await safeEditMessageText(
+        ctx,
         `💳 **Payment & Credits**\n\n` +
         `**/credits** - Check credit balance\n` +
         `**/topup** - Purchase credits\n` +
@@ -424,8 +432,9 @@ export class TelegramBot {
       );
     });
 
-    this.bot.action('help_linking', (ctx) => {
-      ctx.editMessageText(
+    this.bot.action('help_linking', async (ctx) => {
+      await safeEditMessageText(
+        ctx,
         `🔗 **Wallet Linking**\n\n` +
         `**/link <CODE>** - Link website wallet\n` +
         `**/linked** - Check link status\n` +

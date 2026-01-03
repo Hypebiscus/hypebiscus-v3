@@ -4,6 +4,7 @@ import { WalletService } from '../../services/walletService';
 import { MonitoringService } from '../../services/monitoringService';
 import { getOrCreateUser, getActivePositions, getClosedPositions, getPositionStats, updateUserMonitoring } from '../../services/db';
 import { backKeyboard } from '../keyboards';
+import { safeEditMessageText } from '../../utils/telegramHelpers';
 
 export class PositionHandler {
   constructor(
@@ -30,7 +31,8 @@ export class PositionHandler {
 
       if (!user.wallet) {
         await ctx.answerCbQuery('❌ No wallet found');
-        await ctx.editMessageText(
+        await safeEditMessageText(
+          ctx,
           '❌ No wallet found. Create a wallet first.',
           backKeyboard
         );
@@ -38,7 +40,8 @@ export class PositionHandler {
       }
 
       await ctx.answerCbQuery('Opening position creator...');
-      await ctx.editMessageText(
+      await safeEditMessageText(
+        ctx,
         '💰 **Create Position**\n\n' +
         'How much ZBTC do you want to provide as liquidity?\n\n' +
         'Send amount (e.g., 0.001)',
@@ -53,7 +56,8 @@ export class PositionHandler {
     } catch (error) {
       console.error('Error in create position:', error);
       await ctx.answerCbQuery('❌ Failed to open');
-      await ctx.editMessageText(
+      await safeEditMessageText(
+        ctx,
         '❌ Failed to start position creation. Try again.',
         backKeyboard
       );
@@ -290,7 +294,8 @@ export class PositionHandler {
       const positions = await getActivePositions(user.id);
 
       if (positions.length === 0) {
-        await ctx.editMessageText(
+        await safeEditMessageText(
+          ctx,
           '📊 No active positions found.\n\nCreate your first position to start!',
           backKeyboard
         );
@@ -306,13 +311,14 @@ export class PositionHandler {
         message += `   📅 Created: ${new Date(position.createdAt).toLocaleDateString()}\n\n`;
       }
 
-      await ctx.editMessageText(message, {
+      await safeEditMessageText(ctx, message, {
         parse_mode: 'Markdown',
         ...backKeyboard
       });
     } catch (error) {
       console.error('Error viewing positions:', error);
-      await ctx.editMessageText(
+      await safeEditMessageText(
+        ctx,
         '❌ Failed to get positions. Try again.',
         backKeyboard
       );
@@ -338,7 +344,8 @@ export class PositionHandler {
 
       if (positions.length === 0) {
         await ctx.answerCbQuery('❌ No positions found');
-        await ctx.editMessageText(
+        await safeEditMessageText(
+          ctx,
           '❌ No positions found to monitor.',
           backKeyboard
         );
@@ -349,7 +356,8 @@ export class PositionHandler {
       await updateUserMonitoring(user.id, newStatus);
 
       const status = newStatus ? '✅ ON' : '❌ OFF';
-      await ctx.editMessageText(
+      await safeEditMessageText(
+        ctx,
         `🔄 **Monitoring Status: ${status}**\n\n` +
         `Positions: ${positions.length}\n` +
         `Auto-repositioning: ${newStatus ? 'Enabled' : 'Disabled'}`,
@@ -363,7 +371,8 @@ export class PositionHandler {
     } catch (error) {
       console.error('Error toggling monitoring:', error);
       await ctx.answerCbQuery('❌ Toggle failed');
-      await ctx.editMessageText(
+      await safeEditMessageText(
+        ctx,
         '❌ Failed to toggle monitoring. Try again.',
         backKeyboard
       );
@@ -391,7 +400,8 @@ export class PositionHandler {
       const stats = await getPositionStats(user.id);
 
       if (closedPositions.length === 0) {
-        await ctx.editMessageText(
+        await safeEditMessageText(
+          ctx,
           '📊 No closed positions found.',
           backKeyboard
         );
@@ -419,13 +429,14 @@ export class PositionHandler {
         message += `   📅 ${new Date(position.createdAt).toLocaleDateString()}\n\n`;
       }
 
-      await ctx.editMessageText(message, {
+      await safeEditMessageText(ctx, message, {
         parse_mode: 'Markdown',
         ...backKeyboard
       });
     } catch (error) {
       console.error('Error viewing history:', error);
-      await ctx.editMessageText(
+      await safeEditMessageText(
+        ctx,
         '❌ Failed to get history. Try again.',
         backKeyboard
       );
@@ -450,7 +461,8 @@ export class PositionHandler {
       );
 
       if (!user.wallet) {
-        await ctx.editMessageText(
+        await safeEditMessageText(
+          ctx,
           '❌ No wallet found. Create a wallet first.',
           backKeyboard
         );
@@ -460,7 +472,8 @@ export class PositionHandler {
       const activePositions = await getActivePositions(user.id);
 
       if (activePositions.length === 0) {
-        await ctx.editMessageText(
+        await safeEditMessageText(
+          ctx,
           '❌ No active positions to close.',
           backKeyboard
         );
@@ -479,7 +492,8 @@ export class PositionHandler {
 
       buttons.push([Markup.button.callback('⬅️ Back', 'main_menu')]);
 
-      await ctx.editMessageText(
+      await safeEditMessageText(
+        ctx,
         '🔴 **Close Position**\n\n' +
         'Select a position to close:\n\n' +
         '⚠️ This will remove your liquidity immediately.',
@@ -490,7 +504,8 @@ export class PositionHandler {
       );
     } catch (error) {
       console.error('Error in close position:', error);
-      await ctx.editMessageText(
+      await safeEditMessageText(
+        ctx,
         '❌ Failed to load positions. Try again.',
         backKeyboard
       );
@@ -513,7 +528,8 @@ export class PositionHandler {
       const position = positions.find(p => p.positionId === positionId);
 
       if (!position) {
-        await ctx.editMessageText(
+        await safeEditMessageText(
+          ctx,
           '❌ Position not found or already closed.',
           backKeyboard
         );
@@ -521,7 +537,8 @@ export class PositionHandler {
       }
 
       const { Markup } = await import('telegraf');
-      await ctx.editMessageText(
+      await safeEditMessageText(
+        ctx,
         `⚠️ **Confirm Close Position**\n\n` +
         `💰 Amount: ${position.zbtcAmount} ZBTC\n` +
         `📊 Entry Price: $${Number(position.entryPrice).toFixed(2)}\n` +
@@ -541,7 +558,8 @@ export class PositionHandler {
       );
     } catch (error) {
       console.error('Error in confirm close:', error);
-      await ctx.editMessageText(
+      await safeEditMessageText(
+        ctx,
         '❌ Failed to load position details.',
         backKeyboard
       );
@@ -553,7 +571,8 @@ export class PositionHandler {
     if (!telegramId) return;
 
     try {
-      await ctx.editMessageText(
+      await safeEditMessageText(
+        ctx,
         '🔄 Closing position...\n\nThis may take 30-60 seconds.'
       );
 
@@ -634,7 +653,8 @@ export class PositionHandler {
       const pnlEmoji = pnl.realizedPnlUsd >= 0 ? '📈' : '📉';
       const ilEmoji = pnl.impermanentLoss.usd > 0 ? '⚠️' : '✅';
 
-      await ctx.editMessageText(
+      await safeEditMessageText(
+        ctx,
         `✅ **Position Closed Successfully!**\n\n` +
         `${pnlEmoji} **PnL:** ${pnlSign}$${pnl.realizedPnlUsd.toFixed(2)} (${pnlSign}${pnl.realizedPnlPercent.toFixed(2)}%)\n\n` +
         `💰 **Withdrawn:**\n` +
@@ -677,7 +697,7 @@ export class PositionHandler {
                    `Please try again or contact support.`;
       }
 
-      await ctx.editMessageText(errorMsg, backKeyboard);
+      await safeEditMessageText(ctx, errorMsg, backKeyboard);
     }
   }
 }

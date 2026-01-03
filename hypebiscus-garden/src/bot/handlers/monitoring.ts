@@ -4,6 +4,7 @@ import { DlmmService } from '../../services/dlmmService';
 import { MonitoringService } from '../../services/monitoringService';
 import { getOrCreateUser, updateUserMonitoring, getActivePositions } from '../../services/db';
 import { backKeyboard } from '../keyboards';
+import { safeEditMessageText } from '../../utils/telegramHelpers';
 
 export class MonitoringHandler {
   constructor(
@@ -46,13 +47,14 @@ export class MonitoringHandler {
 
 🕒 Last Updated: ${new Date().toLocaleTimeString()}`;
 
-      await ctx.editMessageText(statusMessage, {
+      await safeEditMessageText(ctx, statusMessage, {
         parse_mode: 'Markdown',
         ...backKeyboard
       });
     } catch (error) {
       console.error('Error getting monitoring status:', error);
-      await ctx.editMessageText(
+      await safeEditMessageText(
+        ctx,
         '❌ Failed to get monitoring status. Try again later.',
         backKeyboard
       );
@@ -77,7 +79,8 @@ export class MonitoringHandler {
       // Check if user has any positions
       const activePositions = await getActivePositions(user.id);
       if (activePositions.length === 0) {
-        await ctx.editMessageText(
+        await safeEditMessageText(
+          ctx,
           '❌ No active positions found.\n\nCreate a position first before enabling monitoring.',
           backKeyboard
         );
@@ -89,7 +92,8 @@ export class MonitoringHandler {
       await updateUserMonitoring(user.id, newStatus);
 
       if (newStatus) {
-        await ctx.editMessageText(
+        await safeEditMessageText(
+          ctx,
           `✅ **Monitoring Enabled**\n\n` +
           `🔄 Your ${activePositions.length} position(s) are now being monitored 24/7.\n\n` +
           `📱 You'll receive notifications when:\n` +
@@ -102,7 +106,8 @@ export class MonitoringHandler {
           }
         );
       } else {
-        await ctx.editMessageText(
+        await safeEditMessageText(
+          ctx,
           `❌ **Monitoring Disabled**\n\n` +
           `⏸️ Your positions are no longer being monitored.\n\n` +
           `⚠️ No automatic repositioning will occur until you re-enable monitoring.`,
@@ -116,7 +121,8 @@ export class MonitoringHandler {
       console.log(`📊 User ${telegramId} monitoring: ${newStatus ? 'ON' : 'OFF'}`);
     } catch (error) {
       console.error('Error toggling monitoring:', error);
-      await ctx.editMessageText(
+      await safeEditMessageText(
+        ctx,
         '❌ Failed to toggle monitoring. Please try again.',
         backKeyboard
       );
@@ -141,17 +147,18 @@ export class MonitoringHandler {
       const activePositions = await getActivePositions(user.id);
 
       if (activePositions.length === 0) {
-        await ctx.editMessageText(
+        await safeEditMessageText(
+          ctx,
           '❌ No positions found to check.',
           backKeyboard
         );
         return;
       }
 
-      await ctx.editMessageText('🔄 Checking all positions... Please wait.');
+      await safeEditMessageText(ctx, '🔄 Checking all positions... Please wait.');
 
       const poolStatus = await this.dlmmService.getPoolStatus();
-      
+
       let message = `🔍 **Position Check Results**\n\n` +
         `📊 Current Price: $${poolStatus.currentPrice.toFixed(6)}\n` +
         `🕒 Check Time: ${new Date().toLocaleTimeString()}\n\n`;
@@ -160,7 +167,7 @@ export class MonitoringHandler {
         try {
           const isOutOfRange = await this.dlmmService.isPositionOutOfRange(position.positionId);
           const rangeStatus = isOutOfRange ? '❌ Out of Range' : '✅ In Range';
-          
+
           message += `**Position ${index + 1}:**\n`;
           message += `🆔 \`${position.positionId.substring(0, 8)}...\`\n`;
           message += `💰 Amount: ${position.zbtcAmount} ZBTC\n`;
@@ -173,13 +180,14 @@ export class MonitoringHandler {
         }
       }
 
-      await ctx.editMessageText(message, {
+      await safeEditMessageText(ctx, message, {
         parse_mode: 'Markdown',
         ...backKeyboard
       });
     } catch (error) {
       console.error('Error checking positions:', error);
-      await ctx.editMessageText(
+      await safeEditMessageText(
+        ctx,
         '❌ Failed to check positions. Please try again.',
         backKeyboard
       );
@@ -204,7 +212,8 @@ export class MonitoringHandler {
       // Disable monitoring for this user
       await updateUserMonitoring(user.id, false);
 
-      await ctx.editMessageText(
+      await safeEditMessageText(
+        ctx,
         `🛑 **Emergency Stop Activated**\n\n` +
         `⏹️ All monitoring stopped for your account.\n` +
         `⚠️ No automatic actions will be taken.\n` +
@@ -219,7 +228,8 @@ export class MonitoringHandler {
       console.log(`🛑 Emergency stop activated for user ${telegramId}`);
     } catch (error) {
       console.error('Error in emergency stop:', error);
-      await ctx.editMessageText(
+      await safeEditMessageText(
+        ctx,
         '❌ Failed to execute emergency stop. Please try again.',
         backKeyboard
       );

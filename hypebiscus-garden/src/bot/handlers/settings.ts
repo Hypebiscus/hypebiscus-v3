@@ -12,6 +12,7 @@ import { Context } from 'telegraf';
 import { mcpClient } from '../../utils/mcpClient';
 import { getOrCreateUser, updateUserMonitoring } from '../../services/db';
 import { SimpleCache } from '../../utils/cache';
+import { safeEditMessageText } from '../../utils/telegramHelpers';
 
 // Type definitions for settings response
 interface RepositionSettings {
@@ -29,9 +30,6 @@ const linkedAccountCache = new SimpleCache<any>(5 * 60 * 1000); // 5 minutes
 const settingsCache = new SimpleCache<any>(5 * 60 * 1000); // 5 minutes
 const subscriptionCache = new SimpleCache<any>(1 * 60 * 1000); // 1 minute
 const creditsCache = new SimpleCache<any>(1 * 60 * 1000); // 1 minute
-
-// Track last message content to prevent "message is not modified" errors
-const lastMessageCache = new Map<number, string>();
 
 /**
  * Invalidate caches for a specific user (call after settings updates)
@@ -637,15 +635,11 @@ export async function handleSettingsCallback(ctx: Context) {
         // Update the message with new state
         const { message, keyboard } = await buildSettingsMessage(telegramId.toString());
 
-        // Check if message content changed to prevent "message is not modified" error
-        const lastMessage = lastMessageCache.get(telegramId);
-        if (lastMessage !== message) {
-          await ctx.editMessageText(message, {
-            parse_mode: 'Markdown',
-            reply_markup: keyboard,
-          });
-          lastMessageCache.set(telegramId, message);
-        }
+        // Update message (safely handles "message is not modified" error)
+        await safeEditMessageText(ctx, message, {
+          parse_mode: 'Markdown',
+          reply_markup: keyboard,
+        });
 
         await ctx.answerCbQuery('✅ Auto-reposition enabled!');
         break;
@@ -683,15 +677,11 @@ export async function handleSettingsCallback(ctx: Context) {
         // Update the message with new state
         const { message, keyboard } = await buildSettingsMessage(telegramId.toString());
 
-        // Check if message content changed to prevent "message is not modified" error
-        const lastMessage2 = lastMessageCache.get(telegramId);
-        if (lastMessage2 !== message) {
-          await ctx.editMessageText(message, {
-            parse_mode: 'Markdown',
-            reply_markup: keyboard,
-          });
-          lastMessageCache.set(telegramId, message);
-        }
+        // Update message (safely handles "message is not modified" error)
+        await safeEditMessageText(ctx, message, {
+          parse_mode: 'Markdown',
+          reply_markup: keyboard,
+        });
 
         await ctx.answerCbQuery('⏸️ Auto-reposition disabled');
         break;
@@ -707,17 +697,11 @@ export async function handleSettingsCallback(ctx: Context) {
         // Update the message with current state
         const { message, keyboard } = await buildSettingsMessage(telegramId.toString());
 
-        // Check if message content changed to prevent "message is not modified" error
-        const lastMessage3 = lastMessageCache.get(telegramId);
-        if (lastMessage3 !== message) {
-          await ctx.editMessageText(message, {
-            parse_mode: 'Markdown',
-            reply_markup: keyboard,
-          });
-          lastMessageCache.set(telegramId, message);
-        } else {
-          console.log(`⚠️ Settings unchanged, skipping message update for user ${telegramId}`);
-        }
+        // Update message (safely handles "message is not modified" error)
+        await safeEditMessageText(ctx, message, {
+          parse_mode: 'Markdown',
+          reply_markup: keyboard,
+        });
         break;
       }
 
