@@ -19,21 +19,18 @@ export function RangeBar({
 	const isXOnly = xBalance >= DUST_THRESHOLD && yBalance < DUST_THRESHOLD // X token only (e.g., BTC)
 	const isYOnly = yBalance >= DUST_THRESHOLD && xBalance < DUST_THRESHOLD // Y token only (e.g., SOL)
 
-	// For single-sided positions, calculate the midpoint as the "entry price"
-	const midPrice = (min + max) / 2
-
 	// Determine if out of range based on position type
 	let isOutOfRange = false
 
 	if (isSingleSided) {
 		if (isXOnly) {
-			// X token only (e.g., BTC): active from midpoint to MAX (right side)
-			// Out of range when current price drops BELOW midpoint
-			isOutOfRange = current < midPrice
+			// X token only: price dropped below range (all liquidity converted to X)
+			// Out of range when current price is BELOW minimum
+			isOutOfRange = current < min
 		} else if (isYOnly) {
-			// Y token only (e.g., SOL): active from MIN to midpoint (left side)
-			// Out of range when current price rises ABOVE midpoint
-			isOutOfRange = current > midPrice
+			// Y token only: price rose above range (all liquidity converted to Y)
+			// Out of range when current price is ABOVE maximum
+			isOutOfRange = current > max
 		}
 	} else {
 		// Dual-sided: active from min to max
