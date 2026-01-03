@@ -45,7 +45,6 @@ import { ViewToggle } from "./components/ViewToggle";
 import { PositionsList } from "./components/PositionsList";
 import { ErrorMessage } from "./components/ErrorMessage";
 import { SyncPositionsButton } from "./components/SyncPositionsButton";
-import { CreditGateAlert } from "./components/CreditGateAlert";
 import {
   NoPositionsState,
   WalletNotConnectedState,
@@ -756,14 +755,6 @@ const WalletPage = () => {
               <ViewToggle viewMode={viewMode} onViewModeChange={setViewMode} />
             </div>
           </div>
-
-          {/* Credit Gate Alert */}
-          {connected && (
-            <CreditGateAlert
-              show={connected}
-              positionCount={positionsArray.length}
-            />
-          )}
 
           {/* Error Message */}
           <ErrorMessage error={error} />
