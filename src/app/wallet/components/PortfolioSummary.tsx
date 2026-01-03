@@ -19,6 +19,7 @@ interface PortfolioTotals {
 interface PortfolioSummaryProps {
   pnlData: Map<string, PositionPnLResult>;
   loadingPnl: boolean;
+  loading: boolean;
   userTier: UserTierInfo | null;
 }
 
@@ -261,10 +262,29 @@ function PnLCards({ totals }: { totals: PortfolioTotals }) {
   );
 }
 
-export function PortfolioSummary({ pnlData, loadingPnl, userTier }: PortfolioSummaryProps) {
+function LoadingSkeleton() {
+  return (
+    <div className="grid gap-4 md:grid-cols-3 lg:grid-cols-6 animate-pulse">
+      {[...Array(6)].map((_, i) => (
+        <Card key={i} className="bg-gray-900/50 border-border">
+          <CardHeader className="pb-2">
+            <div className="h-4 bg-gray-700 rounded w-24" />
+          </CardHeader>
+          <CardContent>
+            <div className="h-8 bg-gray-700 rounded w-32 mb-2" />
+            <div className="h-3 bg-gray-800 rounded w-20" />
+          </CardContent>
+        </Card>
+      ))}
+    </div>
+  );
+}
+
+export function PortfolioSummary({ pnlData, loadingPnl, loading, userTier }: PortfolioSummaryProps) {
   const portfolioTotals = useMemo(() => calculatePortfolioTotals(pnlData), [pnlData]);
 
-  if (pnlData.size === 0) {
+  // Only hide if not loading and truly no data
+  if (!loading && !loadingPnl && pnlData.size === 0) {
     return null;
   }
 
@@ -278,14 +298,21 @@ export function PortfolioSummary({ pnlData, loadingPnl, userTier }: PortfolioSum
           </h2>
           {userTier && <UserTierBadge tier={userTier} />}
         </div>
-        {loadingPnl && <span className="text-sm text-gray-400">Calculating PnL...</span>}
+        {(loading || loadingPnl) && (
+          <span className="text-sm text-gray-400">
+            {loading ? 'Loading positions...' : 'Calculating PnL...'}
+          </span>
+        )}
       </div>
 
+      {/* Loading State */}
+      {(loading || loadingPnl) && <LoadingSkeleton />}
+
       {/* Free User - Upgrade Prompt */}
-      {userTier && !userTier.canAccessFullPnL && <UpgradePrompt />}
+      {!loading && !loadingPnl && userTier && !userTier.canAccessFullPnL && <UpgradePrompt />}
 
       {/* Premium/Credits Users - Full PnL Display */}
-      {userTier && userTier.canAccessFullPnL && <PnLCards totals={portfolioTotals} />}
+      {!loading && !loadingPnl && userTier && userTier.canAccessFullPnL && <PnLCards totals={portfolioTotals} />}
     </div>
   );
 }

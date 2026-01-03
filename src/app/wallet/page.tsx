@@ -738,6 +738,7 @@ const WalletPage = () => {
             <PortfolioSummary
               pnlData={pnlData}
               loadingPnl={loadingPnl}
+              loading={loading}
               userTier={userTier}
             />
           )}
