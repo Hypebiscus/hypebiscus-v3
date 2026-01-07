@@ -5,7 +5,7 @@ import { BN } from '@coral-xyz/anchor';
 import { StrategyType } from '@meteora-ag/dlmm';
 import { PoolStatus } from '../types';
 
-const BUFFER_BINS = 10;
+const BUFFER_BINS = 2;
 const REPOSITION_COOLDOWN_MS = 300000;
 const MAX_CREATE_RETRIES = 3;
 const RETRY_DELAY_MS = 3000;
