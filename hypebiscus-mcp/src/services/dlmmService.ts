@@ -67,7 +67,7 @@ export class DlmmService {
   private connection: Connection;
   private poolCache: Map<string, { pool: DLMMInstance; timestamp: number }> = new Map();
   private readonly CACHE_TTL = 5 * 60 * 1000; // 5 minutes
-  private readonly BUFFER_BINS = 10;
+  private readonly BUFFER_BINS = 2;
 
   constructor(rpcUrl?: string) {
     this.connection = new Connection(rpcUrl || config.solanaRpcUrl, {
