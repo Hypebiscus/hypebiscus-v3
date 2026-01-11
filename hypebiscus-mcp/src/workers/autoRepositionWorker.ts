@@ -281,6 +281,33 @@ export class AutoRepositionWorker {
 
       return result;
     } catch (error) {
+      // Check if position no longer exists on-chain
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      if (
+        errorMessage.includes('Position not found') ||
+        errorMessage.includes('already closed') ||
+        errorMessage.includes('Unknown position account')
+      ) {
+        logger.warn(
+          `⚠️ Position ${position.positionId} no longer exists on-chain, marking as inactive`
+        );
+
+        // Mark position as inactive in database
+        await this.closeStalePosition(position.positionId);
+
+        await this.logPositionScan(
+          position.positionId,
+          walletAddress,
+          'closed',
+          null,
+          null,
+          'auto_closed_stale',
+          false
+        );
+
+        return { repositioned: 0, notifications: 0 };
+      }
+
       logger.error(`Failed to process position ${position.positionId}:`, error);
       await this.logPositionScan(
         position.positionId,
@@ -387,6 +414,27 @@ export class AutoRepositionWorker {
       'notified',
       true
     );
+  }
+
+  /**
+   * Close a stale position that no longer exists on-chain
+   */
+  private async closeStalePosition(positionId: string): Promise<void> {
+    try {
+      const prisma = database.getClient();
+      await prisma.positions.updateMany({
+        where: { positionId },
+        data: {
+          isActive: false,
+          closedAt: new Date(),
+        },
+      });
+
+      logger.info(`✅ Marked stale position ${positionId} as inactive`);
+    } catch (error) {
+      logger.error(`Failed to close stale position ${positionId}:`, error);
+      // Don't throw - we want to continue processing other positions
+    }
   }
 
   /**
