@@ -187,10 +187,12 @@ export class AutoRepositionWorker {
     }
 
     // Get user's active positions
+    // IMPORTANT: Filter out positions with data corruption (isActive=true AND closedAt is not null)
     const positions = await prisma.positions.findMany({
       where: {
         userId: settings.userId,
         isActive: true,
+        closedAt: null, // Only truly active positions
       },
     });
 
@@ -227,6 +229,7 @@ export class AutoRepositionWorker {
 
     try {
       // Analyze position and get health status
+      // This will return null for analysis if position doesn't exist
       const { analysis, healthStatus } = await this.analyzePositionHealth(
         position.positionId,
         position.poolAddress
