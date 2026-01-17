@@ -1146,6 +1146,7 @@ const ChatBox: React.FC = () => {
             Your smart assistant for exploring BTC liquidity in the Solana DeFi ecosystem.
           </p>
           
+          {/* Feature list - commented out
           <div className="flex justify-center w-full mb-8">
             <div className="grid grid-cols-1 gap-3 w-full max-w-xl">
               <div className="flex items-start gap-3">
@@ -1156,7 +1157,7 @@ const ChatBox: React.FC = () => {
                   Find the best places to earn with your Bitcoin - updated live.
                 </p>
               </div>
-              
+
               <div className="flex items-start gap-3">
                 <div className="flex-shrink-0">
                   <PlusIcon className="text-primary" size={18} />
@@ -1165,7 +1166,7 @@ const ChatBox: React.FC = () => {
                   Start earning with one click - no complicated steps.
                 </p>
               </div>
-              
+
               <div className="flex items-start gap-3">
                 <div className="flex-shrink-0">
                   <ChartLineIcon className="text-primary" size={18} />
@@ -1174,7 +1175,7 @@ const ChatBox: React.FC = () => {
                   See exactly how much you can earn and how safe each option is.
                 </p>
               </div>
-              
+
               <div className="flex items-start gap-3">
                 <div className="flex-shrink-0">
                   <WalletIcon className="text-primary" size={18} />
@@ -1183,7 +1184,7 @@ const ChatBox: React.FC = () => {
                   You keep full control of your Bitcoin - we never hold your funds.
                 </p>
               </div>
-              
+
               <div className="flex items-start gap-3">
                 <div className="flex-shrink-0">
                   <ShuffleIcon className="text-primary" size={18} />
@@ -1194,6 +1195,8 @@ const ChatBox: React.FC = () => {
               </div>
             </div>
           </div>
+          */}
+
                     
           {/* Portfolio Style Selection - Only this button */}
           <Button
