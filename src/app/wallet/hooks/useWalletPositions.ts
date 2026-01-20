@@ -1,6 +1,7 @@
-import { useState, useEffect } from 'react';
-import { Connection, PublicKey } from '@solana/web3.js';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { PublicKey } from '@solana/web3.js';
 import DLMM from '@meteora-ag/dlmm';
+import { useMeteoraDlmmService } from '@/lib/meteora/meteoraDlmmService';
 
 export interface PoolWithActiveId {
   activeId?: number;
@@ -16,70 +17,104 @@ export interface PositionInfoType {
   [key: string]: unknown;
 }
 
+// Cache for positions to avoid refetching on every render
+const positionsCache = new Map<string, {
+  data: Map<string, PositionInfoType>;
+  timestamp: number;
+}>();
+const CACHE_DURATION = 30000; // 30 seconds
+
 export function useWalletPositions(publicKey: PublicKey | null, connected: boolean) {
   const [positions, setPositions] = useState(new Map<string, PositionInfoType>());
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const { service: dlmmService } = useMeteoraDlmmService();
+  const fetchingRef = useRef(false);
 
-  const fetchPositions = async (userPubKey: PublicKey) => {
+  const fetchPositions = useCallback(async (userPubKey: PublicKey, forceRefresh = false) => {
+    if (!dlmmService || fetchingRef.current) return;
+
+    const cacheKey = userPubKey.toBase58();
+    const cached = positionsCache.get(cacheKey);
+    const now = Date.now();
+
+    // Use cache if available and not forcing refresh
+    if (!forceRefresh && cached && (now - cached.timestamp) < CACHE_DURATION) {
+      setPositions(cached.data);
+      return;
+    }
+
+    fetchingRef.current = true;
+    setLoading(true);
+    setError('');
+
     try {
-      setLoading(true);
-      setError('');
-
-      const connection = new Connection(
-        process.env.NEXT_PUBLIC_SOLANA_RPC_URL ||
-          'https://api.mainnet-beta.solana.com'
-      );
+      // Use shared connection from dlmmService
+      const connection = dlmmService.connection;
 
       const userPositions = await DLMM.getAllLbPairPositionsByUser(
         connection,
         userPubKey
       );
 
-      // Fetch actual current market price for each pool
-      for (const [lbPairAddress, positionInfo] of userPositions.entries()) {
-        try {
-          const dlmmPool = await DLMM.create(
-            connection,
-            new PublicKey(lbPairAddress)
-          );
+      // Fetch active bins in PARALLEL instead of sequential
+      const poolAddresses = Array.from(userPositions.keys());
 
-          const activeBin = await dlmmPool.getActiveBin();
+      await Promise.all(
+        poolAddresses.map(async (lbPairAddress) => {
+          try {
+            const positionInfo = userPositions.get(lbPairAddress);
+            if (!positionInfo) return;
 
-          if (activeBin && activeBin.pricePerToken) {
-            const pool = positionInfo.lbPair as PoolWithActiveId;
-            pool.currentMarketPrice = Number(activeBin.pricePerToken);
+            const dlmmPool = await DLMM.create(
+              connection,
+              new PublicKey(lbPairAddress)
+            );
+
+            const activeBin = await dlmmPool.getActiveBin();
+
+            if (activeBin && activeBin.pricePerToken) {
+              const pool = positionInfo.lbPair as PoolWithActiveId;
+              pool.currentMarketPrice = Number(activeBin.pricePerToken);
+              pool.activeId = activeBin.binId;
+            }
+          } catch (err) {
+            console.error(
+              `Error fetching current price for pool ${lbPairAddress}:`,
+              err
+            );
           }
-        } catch (error) {
-          console.error(
-            `Error fetching current price for pool ${lbPairAddress}:`,
-            error
-          );
-        }
-      }
+        })
+      );
 
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      setPositions(userPositions as any as Map<string, PositionInfoType>);
+      // Update cache
+      positionsCache.set(cacheKey, {
+        data: userPositions as unknown as Map<string, PositionInfoType>,
+        timestamp: now
+      });
+
+      setPositions(userPositions as unknown as Map<string, PositionInfoType>);
     } catch (err) {
       setError('Failed to fetch positions: ' + (err as Error).message);
     } finally {
       setLoading(false);
+      fetchingRef.current = false;
     }
-  };
+  }, [dlmmService]);
 
-  const refreshPositions = () => {
+  const refreshPositions = useCallback(() => {
     if (publicKey) {
-      fetchPositions(publicKey);
+      fetchPositions(publicKey, true); // Force refresh
     }
-  };
+  }, [publicKey, fetchPositions]);
 
   useEffect(() => {
-    if (connected && publicKey) {
+    if (connected && publicKey && dlmmService) {
       fetchPositions(publicKey);
     } else {
       setPositions(new Map());
     }
-  }, [connected, publicKey]);
+  }, [connected, publicKey, dlmmService, fetchPositions]);
 
   return {
     positions,

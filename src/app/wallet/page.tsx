@@ -51,6 +51,7 @@ import {
   LoadingState,
   PnLLoadingIndicator,
 } from "./components/EmptyStates";
+import RepositionModal from "@/components/dashboard-components/RepositionModal";
 
 // Utils
 import { formatBalanceWithSub } from "./utils/formatBalance";
@@ -421,6 +422,37 @@ function PositionItem({
     claimedFeesUSD,
   } = usePositionDisplayData(pos, pool, tokenXMeta, tokenYMeta, positionInfo);
 
+  // Reposition modal state
+  const [isRepositionModalOpen, setIsRepositionModalOpen] = useState(false);
+
+  // Calculate position health (in-range / out-of-range)
+  const positionHealth = React.useMemo(() => {
+    const activeId = pool.activeId;
+    if (activeId === undefined) {
+      return { isInRange: true, status: 'healthy' as const, distanceFromActiveBin: 0 };
+    }
+
+    const lowerBinId = Number(pos.positionData.lowerBinId);
+    const upperBinId = Number(pos.positionData.upperBinId);
+    const isInRange = activeId >= lowerBinId && activeId <= upperBinId;
+
+    let distanceFromActiveBin = 0;
+    if (activeId < lowerBinId) {
+      distanceFromActiveBin = lowerBinId - activeId;
+    } else if (activeId > upperBinId) {
+      distanceFromActiveBin = activeId - upperBinId;
+    }
+
+    let status: 'healthy' | 'at-edge' | 'out-of-range' = 'healthy';
+    if (!isInRange) {
+      status = 'out-of-range';
+    } else if (distanceFromActiveBin <= 5) {
+      status = 'at-edge';
+    }
+
+    return { isInRange, status, distanceFromActiveBin };
+  }, [pool.activeId, pos.positionData.lowerBinId, pos.positionData.upperBinId]);
+
   // Shared token pair display
   const TokenPairDisplay = () => (
     <div className="flex flex-col items-start">
@@ -577,6 +609,17 @@ function PositionItem({
       >
         {claiming ? "Claiming..." : "Claim Fees"}
       </Button>
+      {/* Show Reposition button for out-of-range or at-edge positions */}
+      {(positionHealth.status === 'out-of-range' || positionHealth.status === 'at-edge') && (
+        <Button
+          variant="outline"
+          className={`${size} border-primary text-primary hover:bg-primary/10`}
+          onClick={() => setIsRepositionModalOpen(true)}
+          disabled={!publicKey}
+        >
+          Reposition
+        </Button>
+      )}
       <Button
         className={size}
         onClick={handleCloseAndWithdraw}
@@ -660,12 +703,25 @@ function PositionItem({
           </div>
           <ActionButtons />
         </div>
+
+        {/* Reposition Modal */}
+        <RepositionModal
+          isOpen={isRepositionModalOpen}
+          onClose={() => setIsRepositionModalOpen(false)}
+          position={pos}
+          pool={pool}
+          lbPairAddress={lbPairAddress}
+          tokenXMeta={tokenXMeta}
+          tokenYMeta={tokenYMeta}
+          onSuccess={refreshPositions}
+        />
       </div>
     );
   }
 
   // Table row format
   return (
+    <>
     <tr key={lbPairAddress}>
       <td className="px-4 py-3 whitespace-nowrap">
         <TokenPairDisplay />
@@ -697,6 +753,19 @@ function PositionItem({
         </div>
       </td>
     </tr>
+
+    {/* Reposition Modal for table view */}
+    <RepositionModal
+      isOpen={isRepositionModalOpen}
+      onClose={() => setIsRepositionModalOpen(false)}
+      position={pos}
+      pool={pool}
+      lbPairAddress={lbPairAddress}
+      tokenXMeta={tokenXMeta}
+      tokenYMeta={tokenYMeta}
+      onSuccess={refreshPositions}
+    />
+    </>
   );
 }
 

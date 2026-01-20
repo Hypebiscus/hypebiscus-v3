@@ -18,6 +18,7 @@ import BtcFilterModal from "./BtcFilterModal";
 import AddLiquidityModal from "./AddLiquidityModal";
 import QuickActionButtons from "./QuickActionButtons";
 import PortfolioStyleModal from "./PortfolioStyleModal";
+import UserPositionsList from "./UserPositionsList";
 import ChatMessage from "@/components/chat-message";
 import ChatInput from "@/components/chat-input";
 import JupiterPlugin from "@/components/JupiterPlugin"; // Changed from JupiterTerminal
@@ -86,6 +87,10 @@ const ChatBox: React.FC = () => {
   // Streaming states
   const [streamingMessage, setStreamingMessage] = useState<string | null>(null);
   const [isStreaming, setIsStreaming] = useState(false);
+
+  // User positions display state
+  const [showUserPositions, setShowUserPositions] = useState(false);
+  const [positionsAiResponse, setPositionsAiResponse] = useState<string>('');
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -330,68 +335,32 @@ const ChatBox: React.FC = () => {
     }
   }, [addMessage]);
 
-  // Handle MCP data queries (positions, performance - REQUIRES PAYMENT)
-  const handleMCPDataQuery = useCallback(async (userMessage: string) => {
+  // Handle MCP data queries (positions - FREE feature)
+  const handleMCPDataQuery = useCallback(async () => {
     if (!connected || !publicKey) {
       addMessage("assistant", "🔐 Please connect your wallet to access your position data.");
       return;
     }
 
-    // Check payment status
-    const accessResult = await verifyAccess({
-      requireCredits: 1,
-      action: 'view your positions',
-    });
-
-    if (!accessResult.hasAccess) {
-      // No payment - show payment modal
-      setPendingMCPQuery(userMessage);
-      setShowPaymentModal(true);
-      addMessage(
-        "assistant",
-        `💳 To access your position data, you need to purchase credits or subscribe to premium.\n\n**Cost**: 1 credit ($0.01) per query\n**Or**: Premium subscription ($4.99/month) for unlimited queries\n\nClick below to purchase credits!`
-      );
-      return;
-    }
-
-    // Has access - execute MCP query
+    // Show positions UI - FREE, no payment required
     try {
-      addMessage("assistant", "📊 Fetching your position data...");
       setIsLoading(true);
+      setShowWelcomeScreen(false);
 
-      const walletAddress = publicKey.toBase58();
-      // mcpClient.callTool() already parses the response
-      const positionsData = await mcpClient.callTool('get_user_positions_with_sync', {
-        walletAddress,
-      }) as {
-        positions?: Array<{ poolAddress: string; totalValueUSD: number }>;
-      };
+      // Set AI response for the positions view
+      const aiResponse = `📊 Here are your active positions. If any position is **out of range**, you can click **Reposition** to close it and re-add liquidity to the current active price range.`;
 
-      if (positionsData.positions && positionsData.positions.length > 0) {
-        const summary = `✅ You have **${positionsData.positions.length}** active position${positionsData.positions.length > 1 ? 's' : ''}:\n\n${positionsData.positions
-          .map((pos: { poolAddress: string; totalValueUSD?: number; positionId?: string }, idx: number) => {
-            const value = pos.totalValueUSD !== undefined && pos.totalValueUSD !== null
-              ? `$${pos.totalValueUSD.toFixed(2)}`
-              : 'Calculating...';
-            const posId = pos.positionId ? pos.positionId.substring(0, 8) : pos.poolAddress.substring(0, 8);
-            return `${idx + 1}. Position: \`${posId}...\` - Value: ${value}`;
-          })
-          .join('\n')}\n\n💰 **Credit used**: 1 credit${accessResult.creditsRemaining !== undefined ? ` (${accessResult.creditsRemaining} remaining)` : ''}`;
+      setPositionsAiResponse(aiResponse);
+      setShowUserPositions(true);
 
-        addMessage("assistant", summary);
-
-        // Show Telegram linking prompt if not linked
-        setShowTelegramPrompt(true);
-      } else {
-        addMessage("assistant", "📭 You don't have any active positions yet. Start by adding liquidity to a pool!");
-      }
+      addMessage("assistant", "📊 Loading your positions with reposition options...");
     } catch (error) {
       console.error('MCP query error:', error);
       addMessage("assistant", "❌ Failed to fetch position data. Please try again.");
     } finally {
       setIsLoading(false);
     }
-  }, [connected, publicKey, verifyAccess, addMessage]);
+  }, [connected, publicKey, addMessage]);
 
   // Handle premium deep analysis (requires credits or subscription)
   const handlePremiumAnalysis = useCallback(async (userMessage: string) => {
@@ -529,7 +498,6 @@ const ChatBox: React.FC = () => {
           "assistant",
           `✅ **Telegram Link Ready!**\n\n**Option 1:** Click the link to open Telegram:\n👉 [Open Telegram Bot](${response.deepLink})\n\n**Option 2:** Or visit the [Link page](/link) to see QR code and manual code options.\n\n⏱️ Link expires in 5 minutes.`
         );
-        setShowTelegramPrompt(true);
       } else {
         throw new Error('Failed to generate link token');
       }
@@ -912,7 +880,7 @@ const ChatBox: React.FC = () => {
         } else if (intent.isPoolMetricsQuery) {
           await handlePoolMetricsQuery();
         } else if (intent.isMCPDataQuery) {
-          await handleMCPDataQuery(userMessage);
+          await handleMCPDataQuery();
         } else if (intent.isAutomationQuery) {
           await handleAutomationQuery();
         } else if (intent.isSwapRequest) {
@@ -1478,6 +1446,34 @@ return (
             onAddLiquidity={handleAddLiquidity}
           />
         ))}
+
+        {/* User Positions List with Reposition functionality */}
+        {showUserPositions && (
+          <div className="w-full">
+            <UserPositionsList
+              onRefresh={() => {
+                // Refresh positions after reposition
+              }}
+              isLoading={isLoading}
+              aiResponse={positionsAiResponse}
+            />
+            <div className="flex justify-center mt-4">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  setShowUserPositions(false);
+                  setPositionsAiResponse('');
+                }}
+                className="text-gray-400 hover:text-white"
+              >
+                Back to Chat
+              </Button>
+            </div>
+            <hr className="mt-6 mb-8 border-border" />
+          </div>
+        )}
+
         <div ref={messagesEndRef} />
       </div>
     </div>

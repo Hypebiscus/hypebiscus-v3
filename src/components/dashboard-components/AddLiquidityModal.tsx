@@ -242,13 +242,15 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
       if (existingRanges.length > 0) {
         finalRanges = existingRanges;
       } else {
+        // Fallback: Use 69 bins ABOVE active bin for one-sided zBTC liquidity
+        // This allows zBTC to fill ALL bins (zBTC can only be placed in bins >= active)
         const fallbackRange: ExistingBinRange = {
-          minBinId: activeBin.binId - 30,
-          maxBinId: activeBin.binId + 30,
-          existingBins: Array.from({length: 61}, (_, i) => activeBin.binId - 30 + i),
-          liquidityDepth: 61,
+          minBinId: activeBin.binId,
+          maxBinId: activeBin.binId + 68,
+          existingBins: Array.from({length: 69}, (_, i) => activeBin.binId + i),
+          liquidityDepth: 69,
           isPopular: false,
-          description: 'Safe price range around current market price'
+          description: 'Full range above current market price'
         };
         finalRanges = [fallbackRange];
       }
@@ -264,14 +266,15 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
       
     } catch (error) {
       console.error('Error finding price ranges:', error);
-      
+
+      // Fallback: Use 69 bins ABOVE active bin for one-sided zBTC liquidity
       const fallbackRange: ExistingBinRange = {
-        minBinId: currentBinId ? currentBinId - 30 : 0,
-        maxBinId: currentBinId ? currentBinId + 30 : 60,
-        existingBins: currentBinId ? Array.from({length: 61}, (_, i) => currentBinId - 30 + i) : Array.from({length: 61}, (_, i) => i),
-        liquidityDepth: 61,
+        minBinId: currentBinId || 0,
+        maxBinId: currentBinId ? currentBinId + 68 : 68,
+        existingBins: currentBinId ? Array.from({length: 69}, (_, i) => currentBinId + i) : Array.from({length: 69}, (_, i) => i),
+        liquidityDepth: 69,
         isPopular: false,
-        description: 'Safe price range around current market price'
+        description: 'Full range above current market price'
       };
       setExistingBinRanges([fallbackRange]);
       setBinRangesLoaded(true);
@@ -365,6 +368,16 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
     setIsCheckingBalance(true);
     setValidationError('');
 
+    // First check if entered amount exceeds token balance
+    const enteredAmount = parseFloat(amount);
+    if (enteredAmount > userTokenBalance) {
+      setValidationError(
+        `Insufficient ${tokenX} balance. You have ${userTokenBalance.toFixed(6)} ${tokenX}.`
+      );
+      setIsCheckingBalance(false);
+      return;
+    }
+
     try {
       const connection = new Connection(
         process.env.NEXT_PUBLIC_SOLANA_RPC_URL || 'https://api.mainnet-beta.solana.com'
@@ -372,7 +385,7 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
 
       const solBalanceLamports = await connection.getBalance(publicKey);
       const solBalance = solBalanceLamports / LAMPORTS_PER_SOL;
-      
+
       const estimatedSolNeeded = selectedStrategyOption.estimatedCost;
       const hasEnoughSol = solBalance >= estimatedSolNeeded;
       const shortfall = Math.max(0, estimatedSolNeeded - solBalance);
@@ -399,7 +412,7 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
     } finally {
       setIsCheckingBalance(false);
     }
-  }, [publicKey, pool, amount, selectedStrategyOption]);
+  }, [publicKey, pool, amount, selectedStrategyOption, userTokenBalance, tokenX]);
 
   useEffect(() => {
     if (amount && parseFloat(amount) > 0 && publicKey && pool && selectedStrategyOption) {
@@ -421,8 +434,17 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
   const handleAddLiquidity = async () => {
     if (!pool || !publicKey || !amount || parseFloat(amount) <= 0 || !currentBinId || !selectedStrategyOption || existingBinRanges.length === 0) return;
 
+    // Check if user has enough token balance
+    const enteredAmount = parseFloat(amount);
+    if (enteredAmount > userTokenBalance) {
+      showToast.error('Insufficient Balance',
+        `You only have ${userTokenBalance.toFixed(6)} ${tokenX}. Please enter a smaller amount.`
+      );
+      return;
+    }
+
     if (balanceInfo && !balanceInfo.hasEnoughSol) {
-      showToast.error('Not Enough SOL', 
+      showToast.error('Not Enough SOL',
         validationError || 'You need more SOL to complete this transaction.'
       );
       return;
@@ -436,8 +458,7 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
 
       const selectedRange = existingBinRanges[0];
 
-      // One-sided zBTC with BidAsk strategy across full range (69 bins for conservative)
-      // BidAsk strategy will automatically distribute zBTC appropriately across the range
+      // Full range with BidAsk strategy - range is above active bin so zBTC fills ALL bins
       const result = await positionService.createPositionWithExistingBins({
         poolAddress: pool.address,
         userPublicKey: publicKey,
@@ -446,7 +467,7 @@ const AddLiquidityModal: React.FC<AddLiquidityModalProps> = ({
         minBinId: selectedRange.minBinId,
         maxBinId: selectedRange.maxBinId,
         strategyType: StrategyType.BidAsk,
-        useAutoFill: false // One-sided: ONLY zBTC, no SOL
+        useAutoFill: false // One-sided zBTC only (range is above active, so all bins get filled)
       }, selectedRange);
       
       const transactionSignatures: string[] = [];

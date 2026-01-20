@@ -265,16 +265,17 @@ export class MeteoraPositionService {
     
     for (const pattern of rangePatterns) {
       if (pattern.width > maxRangeWidth) continue;
-      
-      const centerBin = activeBinId + pattern.offset;
-      const minBinId = centerBin - Math.floor(pattern.width / 2);
-      const maxBinId = centerBin + Math.floor(pattern.width / 2);
-      
-      // Generate likely existing bins using portfolio-specific heuristics
+
+      // Place range ABOVE active bin for one-sided zBTC liquidity
+      // This allows zBTC to fill ALL bins (zBTC can only be placed in bins >= active)
+      const minBinId = activeBinId;
+      const maxBinId = activeBinId + pattern.width - 1;
+
+      // Generate all bins in the range
       const existingBins = this.generateLikelyExistingBins(
-        minBinId, 
-        maxBinId, 
-        activeBinId, 
+        minBinId,
+        maxBinId,
+        activeBinId,
         portfolioStyle
       );
       
@@ -302,99 +303,24 @@ export class MeteoraPositionService {
   }
 
   /**
-   * FIXED: Generate likely existing bins with portfolio-specific probability models
-   * This avoids the need for RPC calls to check each bin individually
+   * Generate all bins in the specified range - deterministic for full range coverage
+   * For full range positions, we include all bins between minBinId and maxBinId
    */
   private generateLikelyExistingBins(
-    minBinId: number, 
-    maxBinId: number, 
-    activeBinId: number,
-    portfolioStyle: string
+    minBinId: number,
+    maxBinId: number,
+    _activeBinId: number,
+    _portfolioStyle: string
   ): number[] {
-    const likelyBins: number[] = [];
-    
-    // Portfolio-specific probability adjustments
-    let probabilityMultiplier = 1.0;
-    let conservativeness = 0.5; // How conservative the probability model is
-    
-    switch (portfolioStyle.toLowerCase()) {
-      case 'conservative':
-        probabilityMultiplier = 1.2; // Higher chance of including bins (more bins = safer)
-        conservativeness = 0.7; // More conservative probability decay
-        break;
-      case 'moderate':
-        probabilityMultiplier = 1.0; // Standard probability
-        conservativeness = 0.5; // Moderate probability decay
-        break;
-      case 'aggressive':
-        probabilityMultiplier = 0.8; // Lower chance (fewer bins = more concentrated)
-        conservativeness = 0.3; // Less conservative (more willing to use distant bins)
-        break;
-    }
-    
-    // Bins are more likely to exist near the active bin
+    // For full range coverage, include ALL bins in the range
+    // This ensures consistent behavior and full 69-bin positions
+    const allBins: number[] = [];
+
     for (let binId = minBinId; binId <= maxBinId; binId++) {
-      const distanceFromActive = Math.abs(binId - activeBinId);
-      
-      // Portfolio-specific probability calculation
-      let baseProbability = 1.0;
-      if (distanceFromActive <= 2) {
-        baseProbability = 0.95; // Very likely
-      } else if (distanceFromActive <= 5) {
-        baseProbability = 0.8; // Likely
-      } else if (distanceFromActive <= 10) {
-        baseProbability = 0.6; // Moderately likely
-      } else {
-        baseProbability = 0.4; // Less likely but possible
-      }
-      
-      // Apply portfolio-specific adjustments
-      const adjustedProbability = Math.min(
-        baseProbability * probabilityMultiplier * (1 - distanceFromActive * conservativeness * 0.05),
-        0.95
-      );
-      
-      // Include bins based on adjusted probability
-      if (Math.random() < adjustedProbability || distanceFromActive <= 3) {
-        likelyBins.push(binId);
-      }
+      allBins.push(binId);
     }
-    
-    // Always include the active bin if it's in range
-    if (activeBinId >= minBinId && activeBinId <= maxBinId && !likelyBins.includes(activeBinId)) {
-      likelyBins.push(activeBinId);
-      likelyBins.sort((a, b) => a - b);
-    }
-    
-    // Portfolio-specific minimum bin requirements
-    let minRequiredBins: number;
-    switch (portfolioStyle.toLowerCase()) {
-      case 'conservative':
-        minRequiredBins = 6; // More bins for safety
-        break;
-      case 'moderate':
-        minRequiredBins = 4; // Balanced approach
-        break;
-      case 'aggressive':
-        minRequiredBins = 3; // Fewer bins for concentration
-        break;
-      default:
-        minRequiredBins = 4;
-    }
-    
-    // Ensure we have at least the minimum required bins around the active bin
-    if (likelyBins.length < minRequiredBins) {
-      const expansion = Math.ceil((minRequiredBins - likelyBins.length) / 2);
-      for (let i = -expansion; i <= expansion; i++) {
-        const binId = activeBinId + i;
-        if (binId >= minBinId && binId <= maxBinId && !likelyBins.includes(binId)) {
-          likelyBins.push(binId);
-        }
-      }
-      likelyBins.sort((a, b) => a - b);
-    }
-    
-    return likelyBins;
+
+    return allBins;
   }
 
   /**

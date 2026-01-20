@@ -1,38 +1,21 @@
 // src/components/LPStatusBadge.tsx
 "use client";
 
-import { useState, useEffect } from "react";
 import { useWallet } from "@solana/wallet-adapter-react";
-import { Connection } from "@solana/web3.js";
-import DLMM from "@meteora-ag/dlmm";
+import { useHybridPositions } from "@/hooks/useHybridPositions";
 import Link from "next/link";
 
 const LPStatusBadge = () => {
   const { publicKey, connected } = useWallet();
-  const [count, setCount] = useState(0);
 
-  useEffect(() => {
-    if (!connected || !publicKey) {
-      setCount(0);
-      return;
-    }
+  // Use SWR-cached hook for positions (reduces RPC calls)
+  const { activePositions } = useHybridPositions(publicKey?.toBase58(), {
+    includeHistorical: false,
+    includeLive: true,
+    refreshInterval: 60000, // 60 seconds (increased from 30s to reduce load)
+  });
 
-    const fetchPositions = async () => {
-      try {
-        const connection = new Connection(
-          process.env.NEXT_PUBLIC_SOLANA_RPC_URL || "https://api.mainnet-beta.solana.com"
-        );
-        const positions = await DLMM.getAllLbPairPositionsByUser(connection, publicKey);
-        setCount(positions.size);
-      } catch (error) {
-        console.error("Error fetching positions:", error);
-      }
-    };
-
-    fetchPositions();
-    const interval = setInterval(fetchPositions, 30000);
-    return () => clearInterval(interval);
-  }, [publicKey, connected]);
+  const count = activePositions.length;
 
   if (!connected || count === 0) return null;
 
