@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { PublicKey } from '@solana/web3.js';
 import { mcpClient, type PositionPnLResult } from '@/lib/mcp-client';
 import type { PositionInfoType, PoolWithActiveId } from './useWalletPositions';
@@ -7,6 +7,9 @@ import { fetchTokenMeta } from './useFilteredPositions';
 
 // Helper to delay between API calls
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+// Stable empty map to avoid creating new references
+const EMPTY_PNL_MAP = new Map<string, PositionPnLResult>();
 
 interface PositionType {
   publicKey: PublicKey;
@@ -75,22 +78,50 @@ export function usePnLData(
   publicKey: PublicKey | null,
   filteredPositions: Map<string, PositionInfoType>
 ) {
-  const [pnlData, setPnlData] = useState<Map<string, PositionPnLResult>>(new Map());
+  const [pnlData, setPnlData] = useState<Map<string, PositionPnLResult>>(EMPTY_PNL_MAP);
   const [loadingPnl, setLoadingPnl] = useState(false);
+  const prevPositionKeysRef = useRef<string>('');
+  const fetchingRef = useRef(false);
 
-  const fetchPnLData = useCallback(
-    async (positionsMap: Map<string, PositionInfoType>) => {
-      if (!publicKey) return;
+  // Create a stable key from positions to detect actual changes
+  const positionKeys = Array.from(filteredPositions.keys()).sort().join(',');
+  const walletAddress = publicKey?.toBase58() ?? null;
 
+  const updatePnL = useCallback((positionId: string, pnl: PositionPnLResult) => {
+    setPnlData((prev) => {
+      const newMap = new Map(prev);
+      newMap.set(positionId, pnl);
+      return newMap;
+    });
+  }, []);
+
+  useEffect(() => {
+    // Skip if positions haven't actually changed or already fetching
+    if (positionKeys === prevPositionKeysRef.current || fetchingRef.current) {
+      return;
+    }
+
+    if (!walletAddress || filteredPositions.size === 0) {
+      prevPositionKeysRef.current = positionKeys;
+      setPnlData(EMPTY_PNL_MAP);
+      return;
+    }
+
+    prevPositionKeysRef.current = positionKeys;
+    fetchingRef.current = true;
+
+    let cancelled = false;
+
+    const fetchPnLData = async () => {
       setLoadingPnl(true);
       const newPnlData = new Map<string, PositionPnLResult>();
 
       try {
         // Sync positions to MCP database first
-        console.log(`🔄 Syncing ${positionsMap.size} positions to MCP database...`);
+        console.log(`🔄 Syncing ${filteredPositions.size} positions to MCP database...`);
         try {
           await mcpClient.getUserPositionsWithSync({
-            walletAddress: publicKey.toBase58(),
+            walletAddress,
             includeHistorical: false,
             includeLive: true,
           });
@@ -101,10 +132,14 @@ export function usePnLData(
 
         // Calculate PnL for each position (with delay to avoid rate limiting)
         let positionIndex = 0;
-        for (const [, positionInfo] of positionsMap.entries()) {
+        for (const [, positionInfo] of filteredPositions.entries()) {
+          if (cancelled) break;
+
           const positions = positionInfo.lbPairPositionsData as PositionType[];
 
           for (const pos of positions) {
+            if (cancelled) break;
+
             const positionId = pos.publicKey.toBase58();
 
             // Add 300ms delay between position calculations (except first one)
@@ -140,31 +175,26 @@ export function usePnLData(
           }
         }
 
-        setPnlData(newPnlData);
+        if (!cancelled) {
+          setPnlData(newPnlData.size > 0 ? newPnlData : EMPTY_PNL_MAP);
+        }
       } catch (error) {
         console.error('Error fetching PnL data:', error);
       } finally {
-        setLoadingPnl(false);
+        if (!cancelled) {
+          setLoadingPnl(false);
+          fetchingRef.current = false;
+        }
       }
-    },
-    [publicKey]
-  );
+    };
 
-  const updatePnL = (positionId: string, pnl: PositionPnLResult) => {
-    setPnlData((prev) => {
-      const newMap = new Map(prev);
-      newMap.set(positionId, pnl);
-      return newMap;
-    });
-  };
+    fetchPnLData();
 
-  useEffect(() => {
-    if (filteredPositions.size > 0) {
-      fetchPnLData(filteredPositions);
-    } else {
-      setPnlData(new Map());
-    }
-  }, [filteredPositions, fetchPnLData]);
+    return () => {
+      cancelled = true;
+      fetchingRef.current = false;
+    };
+  }, [walletAddress, positionKeys, filteredPositions]);
 
   return {
     pnlData,

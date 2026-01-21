@@ -24,8 +24,11 @@ const positionsCache = new Map<string, {
 }>();
 const CACHE_DURATION = 30000; // 30 seconds
 
+// Stable empty map to avoid creating new references
+const EMPTY_POSITIONS_MAP = new Map<string, PositionInfoType>();
+
 export function useWalletPositions(publicKey: PublicKey | null, connected: boolean) {
-  const [positions, setPositions] = useState(new Map<string, PositionInfoType>());
+  const [positions, setPositions] = useState(EMPTY_POSITIONS_MAP);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const { service: dlmmService } = useMeteoraDlmmService();
@@ -112,7 +115,7 @@ export function useWalletPositions(publicKey: PublicKey | null, connected: boole
     if (connected && publicKey && dlmmService) {
       fetchPositions(publicKey);
     } else {
-      setPositions(new Map());
+      setPositions(EMPTY_POSITIONS_MAP);
     }
   }, [connected, publicKey, dlmmService, fetchPositions]);
 

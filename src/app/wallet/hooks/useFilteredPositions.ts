@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import type { PositionInfoType } from './useWalletPositions';
 
 export type MaybeBase58 = { toBase58?: () => string };
@@ -38,12 +38,32 @@ async function fetchTokenMeta(mint: string): Promise<TokenMeta | null> {
   return token;
 }
 
+// Stable empty map to avoid creating new references
+const EMPTY_MAP = new Map<string, PositionInfoType>();
+
 export function useFilteredPositions(positions: Map<string, PositionInfoType>) {
   const [filteredPositions, setFilteredPositions] = useState<Map<string, PositionInfoType>>(
-    new Map()
+    EMPTY_MAP
   );
+  const prevPositionKeysRef = useRef<string>('');
+
+  // Create a stable key from positions to detect actual changes
+  const positionKeys = Array.from(positions.keys()).sort().join(',');
 
   useEffect(() => {
+    // Skip if positions haven't actually changed
+    if (positionKeys === prevPositionKeysRef.current) {
+      return;
+    }
+    prevPositionKeysRef.current = positionKeys;
+
+    if (positions.size === 0) {
+      setFilteredPositions(EMPTY_MAP);
+      return;
+    }
+
+    let cancelled = false;
+
     const filterBTCPositions = async () => {
       const btcPositionsMap = new Map<string, PositionInfoType>();
 
@@ -78,15 +98,17 @@ export function useFilteredPositions(positions: Map<string, PositionInfoType>) {
         }
       }
 
-      setFilteredPositions(btcPositionsMap);
+      if (!cancelled) {
+        setFilteredPositions(btcPositionsMap.size > 0 ? btcPositionsMap : EMPTY_MAP);
+      }
     };
 
-    if (positions.size > 0) {
-      filterBTCPositions();
-    } else {
-      setFilteredPositions(new Map());
-    }
-  }, [positions]);
+    filterBTCPositions();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [positions, positionKeys]);
 
   return filteredPositions;
 }
