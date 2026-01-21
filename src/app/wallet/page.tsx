@@ -66,8 +66,23 @@ function useTokenMeta(pool: PoolWithActiveId) {
   const [tokenXMeta, setTokenXMeta] = React.useState<TokenMeta | null>(null);
   const [tokenYMeta, setTokenYMeta] = React.useState<TokenMeta | null>(null);
 
+  // Extract mint addresses as strings (primitives are stable for dependency comparison)
+  const xMint = pool?.tokenXMint
+    ? typeof (pool.tokenXMint as MaybeBase58).toBase58 === "function"
+      ? (pool.tokenXMint as MaybeBase58).toBase58!()
+      : String(pool.tokenXMint)
+    : null;
+
+  const yMint = pool?.tokenYMint
+    ? typeof (pool.tokenYMint as MaybeBase58).toBase58 === "function"
+      ? (pool.tokenYMint as MaybeBase58).toBase58!()
+      : String(pool.tokenYMint)
+    : null;
+
   React.useEffect(() => {
-    if (!pool) return;
+    if (!xMint || !yMint) return;
+
+    let cancelled = false;
 
     const fetchTokenMetaFromCache = async (mint: string) => {
       const res = await fetch(
@@ -77,20 +92,23 @@ function useTokenMeta(pool: PoolWithActiveId) {
       return data[0];
     };
 
-    const xMint =
-      pool.tokenXMint &&
-      typeof (pool.tokenXMint as MaybeBase58).toBase58 === "function"
-        ? (pool.tokenXMint as MaybeBase58).toBase58!()
-        : pool.tokenXMint;
-    const yMint =
-      pool.tokenYMint &&
-      typeof (pool.tokenYMint as MaybeBase58).toBase58 === "function"
-        ? (pool.tokenYMint as MaybeBase58).toBase58!()
-        : pool.tokenYMint;
+    const fetchBoth = async () => {
+      const [xMeta, yMeta] = await Promise.all([
+        fetchTokenMetaFromCache(xMint),
+        fetchTokenMetaFromCache(yMint),
+      ]);
+      if (!cancelled) {
+        setTokenXMeta(xMeta);
+        setTokenYMeta(yMeta);
+      }
+    };
 
-    fetchTokenMetaFromCache(xMint as string).then(setTokenXMeta);
-    fetchTokenMetaFromCache(yMint as string).then(setTokenYMeta);
-  }, [pool]);
+    fetchBoth();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [xMint, yMint]);
 
   return { tokenXMeta, tokenYMeta };
 }
