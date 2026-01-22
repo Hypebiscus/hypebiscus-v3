@@ -57,15 +57,16 @@ export function SubscriptionModal({ isOpen, onClose, onSuccess }: SubscriptionMo
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-      <div className="border border-border rounded-lg bg-gray-900 max-w-md w-full shadow-2xl">
+    <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-3 sm:p-4">
+      <div className="border border-border rounded-lg bg-gray-900 max-w-md w-full shadow-2xl max-h-[95vh] overflow-y-auto">
         {/* Header */}
-        <div className="flex items-center justify-between p-6 border-b border-border">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-full bg-primary/20 flex items-center justify-center">
-              <Lightning size={24} className="text-primary" weight="fill" />
+        <div className="flex items-center justify-between p-4 sm:p-6 border-b border-border">
+          <div className="flex items-center gap-2 sm:gap-3">
+            <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-full bg-primary/20 flex items-center justify-center">
+              <Lightning size={20} className="text-primary sm:hidden" weight="fill" />
+              <Lightning size={24} className="text-primary hidden sm:block" weight="fill" />
             </div>
-            <h2 className="text-xl font-semibold text-white">Subscribe to Premium</h2>
+            <h2 className="text-lg sm:text-xl font-semibold text-white">Subscribe to Premium</h2>
           </div>
           <button
             onClick={onClose}
@@ -78,13 +79,14 @@ export function SubscriptionModal({ isOpen, onClose, onSuccess }: SubscriptionMo
 
         {/* Success State */}
         {txSignature ? (
-          <div className="p-6 text-center">
-            <div className="w-16 h-16 rounded-full bg-green-500/20 flex items-center justify-center mx-auto mb-4">
-              <Check size={40} className="text-green-400" weight="bold" />
+          <div className="p-4 sm:p-6 text-center">
+            <div className="w-12 h-12 sm:w-16 sm:h-16 rounded-full bg-green-500/20 flex items-center justify-center mx-auto mb-3 sm:mb-4">
+              <Check size={32} className="text-green-400 sm:hidden" weight="bold" />
+              <Check size={40} className="text-green-400 hidden sm:block" weight="bold" />
             </div>
-            <h3 className="text-xl font-semibold text-white mb-2">Subscription Active!</h3>
-            <p className="text-gray-400 mb-4">
-              You now have unlimited auto-repositions for 30 days
+            <h3 className="text-lg sm:text-xl font-semibold text-white mb-2">Subscription Active!</h3>
+            <p className="text-sm text-gray-400 mb-3 sm:mb-4">
+              Unlimited auto-repositions for 30 days
             </p>
             <a
               href={`https://solscan.io/tx/${txSignature}${process.env.NEXT_PUBLIC_SOLANA_NETWORK !== 'mainnet-beta' ? '?cluster=devnet' : ''}`}
@@ -98,61 +100,51 @@ export function SubscriptionModal({ isOpen, onClose, onSuccess }: SubscriptionMo
         ) : (
           <>
             {/* Content */}
-            <div className="p-6 space-y-4">
+            <div className="p-4 sm:p-6 space-y-3 sm:space-y-4">
               {/* Pricing */}
-              <div className="border border-primary/30 rounded-lg p-6 bg-primary/10 text-center">
-                <div className="text-4xl font-bold text-white mb-2">
+              <div className="border border-primary/30 rounded-lg p-4 sm:p-6 bg-primary/10 text-center">
+                <div className="text-3xl sm:text-4xl font-bold text-white mb-1 sm:mb-2">
                   ${SUBSCRIPTION_PRICE}
-                  <span className="text-lg text-gray-400 font-normal">/month</span>
+                  <span className="text-base sm:text-lg text-gray-400 font-normal">/month</span>
                 </div>
-                <p className="text-sm text-gray-400">Paid in USDC</p>
+                <p className="text-xs sm:text-sm text-gray-400">Paid in USDC</p>
               </div>
 
-              {/* Benefits */}
-              <div className="space-y-3">
-                <h3 className="text-sm font-semibold text-white">What&apos;s Included:</h3>
-                <ul className="space-y-2">
-                  <li className="flex items-start gap-2 text-sm text-gray-300">
-                    <Check size={18} className="text-green-400 mt-0.5 flex-shrink-0" />
-                    <span>Unlimited auto-repositions</span>
-                  </li>
-                  <li className="flex items-start gap-2 text-sm text-gray-300">
-                    <Check size={18} className="text-green-400 mt-0.5 flex-shrink-0" />
-                    <span>Priority position monitoring</span>
-                  </li>
-                  <li className="flex items-start gap-2 text-sm text-gray-300">
-                    <Check size={18} className="text-green-400 mt-0.5 flex-shrink-0" />
-                    <span>Advanced analytics & insights</span>
-                  </li>
-                  <li className="flex items-start gap-2 text-sm text-gray-300">
-                    <Check size={18} className="text-green-400 mt-0.5 flex-shrink-0" />
-                    <span>Telegram & website notifications</span>
-                  </li>
-                  <li className="flex items-start gap-2 text-sm text-gray-300">
-                    <Check size={18} className="text-green-400 mt-0.5 flex-shrink-0" />
-                    <span>24/7 support</span>
-                  </li>
-                </ul>
+              {/* Benefits - Compact 2-column grid on mobile */}
+              <div className="grid grid-cols-2 gap-2 text-xs sm:text-sm text-gray-300">
+                <div className="flex items-center gap-1.5">
+                  <Check size={14} className="text-green-400 flex-shrink-0" />
+                  <span>Unlimited repositions</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <Check size={14} className="text-green-400 flex-shrink-0" />
+                  <span>Priority monitoring</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <Check size={14} className="text-green-400 flex-shrink-0" />
+                  <span>Advanced analytics</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <Check size={14} className="text-green-400 flex-shrink-0" />
+                  <span>24/7 support</span>
+                </div>
               </div>
 
               {/* Wallet Check */}
               {!connected && (
-                <div className="border border-yellow-500/30 rounded-lg p-4 bg-yellow-900/10">
-                  <div className="flex items-start gap-3">
-                    <Wallet size={20} className="text-yellow-400 mt-0.5" />
-                    <div>
-                      <p className="text-sm font-medium text-yellow-300">Wallet Required</p>
-                      <p className="text-xs text-gray-400 mt-1">
-                        Please connect your wallet to purchase subscription
-                      </p>
-                    </div>
+                <div className="border border-yellow-500/30 rounded-lg p-3 bg-yellow-900/10">
+                  <div className="flex items-center gap-2">
+                    <Wallet size={18} className="text-yellow-400 flex-shrink-0" />
+                    <p className="text-xs sm:text-sm font-medium text-yellow-300">
+                      Connect wallet to subscribe
+                    </p>
                   </div>
                 </div>
               )}
             </div>
 
             {/* Footer */}
-            <div className="p-6 border-t border-border space-y-3">
+            <div className="p-4 sm:p-6 border-t border-border">
               <Button
                 onClick={handleSubscribe}
                 disabled={loading || !connected}
@@ -167,13 +159,10 @@ export function SubscriptionModal({ isOpen, onClose, onSuccess }: SubscriptionMo
                 ) : (
                   <>
                     <Lightning size={20} className="mr-2" weight="fill" />
-                    Subscribe for ${SUBSCRIPTION_PRICE}/month
+                    Subscribe - ${SUBSCRIPTION_PRICE}/month
                   </>
                 )}
               </Button>
-              <p className="text-xs text-center text-gray-500">
-                Auto-renews monthly. Cancel anytime from settings.
-              </p>
             </div>
           </>
         )}
