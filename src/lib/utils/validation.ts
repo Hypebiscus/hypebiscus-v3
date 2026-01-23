@@ -347,3 +347,184 @@ export function validateMCPRequest(body: unknown): { isValid: boolean; error?: s
 
   return { isValid: true };
 }
+
+// ============================================================================
+// Conversation & Message Validation
+// ============================================================================
+
+export interface ConversationCreateBody {
+  walletAddress: string;
+  title?: string;
+}
+
+export interface ConversationUpdateBody {
+  title: string;
+}
+
+export interface MessageCreateBody {
+  role: 'user' | 'assistant';
+  content: string;
+  poolData?: Record<string, unknown>;
+  metadata?: Record<string, unknown>;
+}
+
+/**
+ * Validate conversation creation request
+ */
+export function validateConversationCreate(body: unknown): ConversationCreateBody {
+  if (!body || typeof body !== 'object') {
+    throw new ValidationError('Invalid request body');
+  }
+
+  const { walletAddress, title } = body as Record<string, unknown>;
+
+  // Validate wallet address (required)
+  if (!walletAddress || typeof walletAddress !== 'string') {
+    throw new ValidationError('Wallet address is required', 'walletAddress');
+  }
+
+  // Validate wallet address format (Solana base58, 32-44 chars)
+  if (walletAddress.length < 32 || walletAddress.length > 44) {
+    throw new ValidationError('Invalid wallet address length', 'walletAddress');
+  }
+
+  if (!/^[1-9A-HJ-NP-Za-km-z]+$/.test(walletAddress)) {
+    throw new ValidationError('Invalid wallet address format', 'walletAddress');
+  }
+
+  // Validate title (optional)
+  if (title !== undefined) {
+    if (typeof title !== 'string') {
+      throw new ValidationError('Title must be a string', 'title');
+    }
+
+    if (title.length > 200) {
+      throw new ValidationError('Title too long. Maximum 200 characters allowed', 'title');
+    }
+
+    // Basic XSS prevention
+    if (/<script|javascript:|on\w+\s*=/i.test(title)) {
+      throw new ValidationError('Title contains potentially malicious content', 'title');
+    }
+  }
+
+  return {
+    walletAddress,
+    title: title as string | undefined,
+  };
+}
+
+/**
+ * Validate conversation update request
+ */
+export function validateConversationUpdate(body: unknown): ConversationUpdateBody {
+  if (!body || typeof body !== 'object') {
+    throw new ValidationError('Invalid request body');
+  }
+
+  const { title } = body as Record<string, unknown>;
+
+  // Validate title (required for update)
+  if (!title || typeof title !== 'string') {
+    throw new ValidationError('Title is required', 'title');
+  }
+
+  if (title.length === 0) {
+    throw new ValidationError('Title cannot be empty', 'title');
+  }
+
+  if (title.length > 200) {
+    throw new ValidationError('Title too long. Maximum 200 characters allowed', 'title');
+  }
+
+  // Basic XSS prevention
+  if (/<script|javascript:|on\w+\s*=/i.test(title)) {
+    throw new ValidationError('Title contains potentially malicious content', 'title');
+  }
+
+  return { title };
+}
+
+/**
+ * Validate message creation request
+ */
+export function validateMessageCreate(body: unknown): MessageCreateBody {
+  if (!body || typeof body !== 'object') {
+    throw new ValidationError('Invalid request body');
+  }
+
+  const { role, content, poolData, metadata } = body as Record<string, unknown>;
+
+  // Validate role (required)
+  if (!role || !['user', 'assistant'].includes(role as string)) {
+    throw new ValidationError('Role must be "user" or "assistant"', 'role');
+  }
+
+  // Validate content (required)
+  if (typeof content !== 'string') {
+    throw new ValidationError('Content must be a string', 'content');
+  }
+
+  if (content.length === 0) {
+    throw new ValidationError('Content cannot be empty', 'content');
+  }
+
+  if (content.length > 10000) {
+    throw new ValidationError('Content too long. Maximum 10,000 characters allowed', 'content');
+  }
+
+  // Basic XSS prevention
+  if (/<script|javascript:|on\w+\s*=/i.test(content)) {
+    throw new ValidationError('Content contains potentially malicious content', 'content');
+  }
+
+  // Validate poolData (optional)
+  if (poolData !== undefined) {
+    if (typeof poolData !== 'object' || poolData === null) {
+      throw new ValidationError('Pool data must be an object', 'poolData');
+    }
+
+    const poolDataString = JSON.stringify(poolData);
+    if (poolDataString.length > 50000) {
+      throw new ValidationError('Pool data too large. Maximum 50KB allowed', 'poolData');
+    }
+  }
+
+  // Validate metadata (optional)
+  if (metadata !== undefined) {
+    if (typeof metadata !== 'object' || metadata === null) {
+      throw new ValidationError('Metadata must be an object', 'metadata');
+    }
+
+    const metadataString = JSON.stringify(metadata);
+    if (metadataString.length > 10000) {
+      throw new ValidationError('Metadata too large. Maximum 10KB allowed', 'metadata');
+    }
+  }
+
+  return {
+    role: role as 'user' | 'assistant',
+    content,
+    poolData: poolData as Record<string, unknown> | undefined,
+    metadata: metadata as Record<string, unknown> | undefined,
+  };
+}
+
+/**
+ * Validate wallet address query parameter
+ */
+export function validateWalletAddressParam(walletAddress: unknown): string {
+  if (!walletAddress || typeof walletAddress !== 'string') {
+    throw new ValidationError('Wallet address is required', 'walletAddress');
+  }
+
+  if (walletAddress.length < 32 || walletAddress.length > 44) {
+    throw new ValidationError('Invalid wallet address length', 'walletAddress');
+  }
+
+  if (!/^[1-9A-HJ-NP-Za-km-z]+$/.test(walletAddress)) {
+    throw new ValidationError('Invalid wallet address format', 'walletAddress');
+  }
+
+  return walletAddress;
+}

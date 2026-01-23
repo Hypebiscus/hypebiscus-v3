@@ -3,7 +3,6 @@
 import React, { useState } from 'react';
 import { useWallet } from '@solana/wallet-adapter-react';
 import Header from '@/components/header';
-import Menu from '@/components/menu';
 import { SubscriptionModal } from '@/components/mcp-components/SubscriptionModal';
 import { CreditsPurchaseModal } from '@/components/mcp-components/CreditsPurchaseModal';
 import { Button } from '@/components/ui/button';
@@ -27,12 +26,8 @@ export default function PricingPage() {
   return (
     <div className="flex min-h-screen flex-col relative">
       <Header />
-      <main className="w-full flex-1 lg:gap-4 relative lg:px-[70px] px-4 mt-6 lg:mt-0">
-        <div className="absolute top-0 left-4 lg:flex justify-center items-center h-full hidden">
-          <Menu />
-        </div>
-        <div className="flex-1">
-          <div className="max-w-6xl mx-auto py-8">
+      <main className="w-full flex-1 lg:px-[70px] px-4">
+        <div className="max-w-6xl mx-auto py-8">
             {/* Header */}
             <div className="text-center mb-12">
               <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-primary/20 mb-6">
@@ -206,7 +201,6 @@ export default function PricingPage() {
               </p>
             )}
               </div>
-            </div>
           </div>
         </div>
       </main>

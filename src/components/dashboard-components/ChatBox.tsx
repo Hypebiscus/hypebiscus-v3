@@ -5,9 +5,6 @@ import React, { useState, useRef, useEffect, useCallback, useMemo } from "react"
 import { Button } from "@/components/ui/button";
 import {
   ChartLineIcon,
-  ClockIcon,
-  PlusIcon,
-  WalletIcon,
   ArrowClockwiseIcon,
   ShuffleIcon,
   XIcon,
@@ -49,7 +46,68 @@ interface MessageWithPool {
   pools?: FormattedPool[];
 }
 
-const ChatBox: React.FC = () => {
+interface ChatBoxProps {
+  conversationId?: string | null;
+  onConversationStart?: (title?: string) => { id: string } | Promise<{ id: string }>;
+  onConversationUpdate?: (id: string) => void;
+}
+
+const MESSAGES_STORAGE_PREFIX = "hypebiscus_messages_";
+
+// Helper function to save message to API
+async function saveMessageToAPI(
+  conversationId: string,
+  walletAddress: string,
+  role: "user" | "assistant",
+  content: string,
+  poolData?: FormattedPool[]
+): Promise<void> {
+  try {
+    await fetch(`/api/conversations/${conversationId}/messages?walletAddress=${walletAddress}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        role,
+        content,
+        poolData: poolData ? poolData : undefined,
+      }),
+    });
+  } catch (error) {
+    console.error("Failed to save message to API:", error);
+  }
+}
+
+// Helper function to load messages from API
+async function loadMessagesFromAPI(
+  conversationId: string,
+  walletAddress: string
+): Promise<Message[] | null> {
+  try {
+    const response = await fetch(
+      `/api/conversations/${conversationId}/messages?walletAddress=${walletAddress}`
+    );
+    if (!response.ok) return null;
+
+    const result = await response.json();
+    if (result.data) {
+      return result.data.map((m: { role: MessageRole; content: string; createdAt: string; poolData?: FormattedPool[] }) => ({
+        role: m.role,
+        content: m.content,
+        timestamp: new Date(m.createdAt),
+      }));
+    }
+    return null;
+  } catch (error) {
+    console.error("Failed to load messages from API:", error);
+    return null;
+  }
+}
+
+const ChatBox: React.FC<ChatBoxProps> = ({
+  conversationId,
+  onConversationStart,
+  onConversationUpdate,
+}) => {
   // Hooks
   const { publicKey, connected } = useWallet();
   const router = useRouter();
@@ -93,6 +151,98 @@ const ChatBox: React.FC = () => {
   const [positionsAiResponse, setPositionsAiResponse] = useState<string>('');
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const prevConversationIdRef = useRef<string | null>(null);
+
+  // Load messages when conversation changes
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    const walletAddress = publicKey?.toBase58();
+
+    // Save previous conversation messages before switching (localStorage fallback for guest mode)
+    if (prevConversationIdRef.current && prevConversationIdRef.current !== conversationId) {
+      const prevMessages = messages;
+      if (prevMessages.length > 0 && !connected) {
+        try {
+          localStorage.setItem(
+            MESSAGES_STORAGE_PREFIX + prevConversationIdRef.current,
+            JSON.stringify(prevMessages)
+          );
+        } catch (error) {
+          console.error("Failed to save messages:", error);
+        }
+      }
+    }
+
+    // Load messages for new conversation
+    const loadMessages = async () => {
+      if (conversationId) {
+        // Try API first if wallet connected
+        if (connected && walletAddress) {
+          const apiMessages = await loadMessagesFromAPI(conversationId, walletAddress);
+          if (apiMessages && apiMessages.length > 0) {
+            setMessages(apiMessages);
+            setMessageWithPools(apiMessages.map((m) => ({ message: m })));
+            setShowWelcomeScreen(false);
+            prevConversationIdRef.current = conversationId;
+            return;
+          }
+        }
+
+        // Fallback to localStorage
+        try {
+          const stored = localStorage.getItem(MESSAGES_STORAGE_PREFIX + conversationId);
+          if (stored) {
+            const parsed = JSON.parse(stored) as Message[];
+            const withDates = parsed.map((m) => ({
+              ...m,
+              timestamp: new Date(m.timestamp),
+            }));
+            setMessages(withDates);
+            setMessageWithPools(withDates.map((m) => ({ message: m })));
+            setShowWelcomeScreen(false);
+          } else {
+            // New conversation - reset to welcome screen
+            setMessages([]);
+            setMessageWithPools([]);
+            setShowWelcomeScreen(true);
+          }
+        } catch (error) {
+          console.error("Failed to load messages:", error);
+          setMessages([]);
+          setMessageWithPools([]);
+          setShowWelcomeScreen(true);
+        }
+      } else {
+        // No conversation selected - show welcome screen
+        setMessages([]);
+        setMessageWithPools([]);
+        setShowWelcomeScreen(true);
+      }
+
+      prevConversationIdRef.current = conversationId ?? null;
+    };
+
+    loadMessages();
+  }, [conversationId, connected, publicKey]);
+
+  // Save messages to localStorage when they change (for guest mode fallback only)
+  // API saving happens in addMessage directly to avoid duplicate saves
+  useEffect(() => {
+    if (typeof window === "undefined" || !conversationId || messages.length === 0) return;
+
+    // Only save to localStorage if not connected (guest mode)
+    if (!connected) {
+      try {
+        localStorage.setItem(
+          MESSAGES_STORAGE_PREFIX + conversationId,
+          JSON.stringify(messages)
+        );
+      } catch (error) {
+        console.error("Failed to save messages:", error);
+      }
+    }
+  }, [messages, conversationId, connected]);
 
   // Services
   const { handleError} = useErrorHandler();
@@ -192,8 +342,14 @@ const ChatBox: React.FC = () => {
       if (showWelcomeScreen) {
         setShowWelcomeScreen(false);
       }
+
+      // Save to API if connected and we have a conversation
+      if (connected && publicKey && conversationId && content) {
+        const walletAddress = publicKey.toBase58();
+        saveMessageToAPI(conversationId, walletAddress, role, content, pools);
+      }
     },
-    [showWelcomeScreen]
+    [showWelcomeScreen, connected, publicKey, conversationId]
   );
 
   const addErrorMessage = useCallback(
@@ -861,6 +1017,18 @@ const ChatBox: React.FC = () => {
       const messageToSend = message || inputMessage;
       if (!messageToSend.trim()) return;
 
+      // Create conversation if none exists (first message)
+      let currentConversationId = conversationId;
+      if (!currentConversationId && onConversationStart) {
+        // Use first few words of message as title
+        const title = messageToSend.slice(0, 30) + (messageToSend.length > 30 ? "..." : "");
+        const newConversation = await Promise.resolve(onConversationStart(title));
+        currentConversationId = newConversation.id;
+      } else if (currentConversationId && onConversationUpdate) {
+        // Touch conversation to update timestamp
+        onConversationUpdate(currentConversationId);
+      }
+
       // Add user message and clear input
       addMessage("user", messageToSend);
       const userMessage = messageToSend;
@@ -906,6 +1074,9 @@ const ChatBox: React.FC = () => {
     },
     [
       inputMessage,
+      conversationId,
+      onConversationStart,
+      onConversationUpdate,
       addMessage,
       analyzeMessageIntent,
       handlePremiumAnalysis,
