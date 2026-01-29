@@ -4,7 +4,8 @@
 import { ValidationError } from './validation';
 
 // Shared XSS pattern for detecting potentially malicious content
-export const XSS_PATTERN = /<script|javascript:|on\w+\s*=/i;
+// Covers: script tags, event handlers, javascript: URLs, iframes, data URLs, and other vectors
+export const XSS_PATTERN = /<(?:script|iframe|object|embed|applet|meta|link|style|base)|javascript:|data:text\/html|on\w+\s*=/i;
 
 /**
  * Validate role field (user or assistant)
@@ -13,7 +14,13 @@ export const XSS_PATTERN = /<script|javascript:|on\w+\s*=/i;
  * @throws ValidationError if role is invalid
  */
 export function validateRole(role: unknown, fieldName: string = 'role'): void {
-  if (!role || !['user', 'assistant'].includes(role as string)) {
+  // Type check FIRST to prevent bypass with empty string or non-strings
+  if (typeof role !== 'string') {
+    throw new ValidationError(`${fieldName.charAt(0).toUpperCase() + fieldName.slice(1)} must be a string`, fieldName);
+  }
+
+  // Validate value is one of allowed roles
+  if (!['user', 'assistant'].includes(role)) {
     throw new ValidationError(`${fieldName.charAt(0).toUpperCase() + fieldName.slice(1)} must be "user" or "assistant"`, fieldName);
   }
 }
@@ -84,8 +91,30 @@ export function validateOptionalObject(
     );
   }
 
-  // Size check
-  const serialized = JSON.stringify(obj);
+  // Prototype pollution protection - reject dangerous properties
+  if (
+    Object.prototype.hasOwnProperty.call(obj, '__proto__') ||
+    Object.prototype.hasOwnProperty.call(obj, 'constructor') ||
+    Object.prototype.hasOwnProperty.call(obj, 'prototype')
+  ) {
+    throw new ValidationError(
+      `${fieldName.charAt(0).toUpperCase() + fieldName.slice(1)} contains forbidden properties`,
+      fieldName
+    );
+  }
+
+  // Size check with error handling for circular references
+  let serialized: string;
+  try {
+    serialized = JSON.stringify(obj);
+  } catch (error) {
+    // Catch circular reference errors and other JSON.stringify failures
+    throw new ValidationError(
+      `${fieldName.charAt(0).toUpperCase() + fieldName.slice(1)} cannot be serialized (possible circular reference)`,
+      fieldName
+    );
+  }
+
   if (serialized.length > maxSize) {
     const sizeMB = maxSize >= 1000 ? `${(maxSize / 1000).toFixed(0)}KB` : `${maxSize} bytes`;
     throw new ValidationError(
@@ -112,11 +141,21 @@ export function validateWalletAddress(
     return;
   }
 
-  // Type and presence check
-  if (!walletAddress || typeof walletAddress !== 'string') {
+  // Type check FIRST to prevent bypass
+  if (typeof walletAddress !== 'string') {
     if (required) {
       throw new ValidationError('Wallet address is required', fieldName);
     }
+    return;
+  }
+
+  // Check for empty string (if required)
+  if (required && walletAddress.length === 0) {
+    throw new ValidationError('Wallet address is required', fieldName);
+  }
+
+  // Allow empty if not required
+  if (!required && walletAddress.length === 0) {
     return;
   }
 
