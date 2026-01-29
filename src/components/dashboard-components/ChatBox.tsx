@@ -25,6 +25,7 @@ import { FormattedPool, formatPool, getPreferredBinSteps } from '@/lib/utils/poo
 import { useErrorHandler } from '@/lib/utils/errorHandling';
 import { usePoolSearchService } from '@/lib/services/poolSearchService';
 import { usePaymentVerification } from '@/hooks/usePaymentVerification';
+import { useMessageRouter } from '@/hooks/useMessageRouter';
 import { mcpClient } from '@/lib/services/mcpClient';
 import { CreditsPurchaseModal } from '@/components/mcp-components/CreditsPurchaseModal';
 import { CreditBalanceIndicator } from './CreditBalanceIndicator';
@@ -1011,6 +1012,19 @@ const ChatBox: React.FC<ChatBoxProps> = ({
     cleanupLoadingMessages
   ]);
 
+  // Message router hook - separates routing logic from conversation lifecycle
+  const { routeMessage } = useMessageRouter({
+    handlePremiumAnalysis,
+    handlePoolMetricsQuery,
+    handleMCPDataQuery,
+    handleAutomationQuery,
+    handleSwapRequest,
+    handleEducationalQuery,
+    handleAlternativePoolRequest,
+    handlePoolRequest,
+    handleGeneralChat,
+  });
+
   // Main refactored handleSendMessage function
   const handleSendMessage = useCallback(
     async (message?: string) => {
@@ -1039,29 +1053,9 @@ const ChatBox: React.FC<ChatBoxProps> = ({
       await new Promise(resolve => setTimeout(resolve, 100));
 
       try {
-        // Analyze message intent
+        // Analyze message intent and route to appropriate handler
         const intent = analyzeMessageIntent(userMessage);
-
-        // Route to appropriate handler based on intent (prioritize paid features)
-        if (intent.isPremiumAnalysis) {
-          await handlePremiumAnalysis(userMessage);
-        } else if (intent.isPoolMetricsQuery) {
-          await handlePoolMetricsQuery();
-        } else if (intent.isMCPDataQuery) {
-          await handleMCPDataQuery();
-        } else if (intent.isAutomationQuery) {
-          await handleAutomationQuery();
-        } else if (intent.isSwapRequest) {
-          await handleSwapRequest();
-        } else if (intent.isEducational) {
-          await handleEducationalQuery(userMessage);
-        } else if (intent.isAlternativeRequest) {
-          await handleAlternativePoolRequest();
-        } else if (intent.isPoolRequest) {
-          await handlePoolRequest();
-        } else {
-          await handleGeneralChat(userMessage);
-        }
+        await routeMessage(intent, userMessage);
       } catch (error) {
         console.error("Error sending message:", error);
         addErrorMessage(error);
@@ -1079,15 +1073,7 @@ const ChatBox: React.FC<ChatBoxProps> = ({
       onConversationUpdate,
       addMessage,
       analyzeMessageIntent,
-      handlePremiumAnalysis,
-      handlePoolMetricsQuery,
-      handleMCPDataQuery,
-      handleAutomationQuery,
-      handleSwapRequest,
-      handleEducationalQuery,
-      handleAlternativePoolRequest,
-      handlePoolRequest,
-      handleGeneralChat,
+      routeMessage,
       addErrorMessage
     ]
   );

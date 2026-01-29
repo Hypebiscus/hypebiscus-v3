@@ -1,5 +1,13 @@
 // Input validation utilities for API endpoints
 
+import {
+  validateRole,
+  validateContent,
+  validateOptionalObject,
+  validateWalletAddress as validateWalletAddressHelper,
+  XSS_PATTERN,
+} from './validationHelpers';
+
 export interface ChatMessage {
   role: 'user' | 'assistant'
   content: string
@@ -51,29 +59,16 @@ function validateSingleMessage(message: unknown, index: number): void {
 
   const msg = message as Record<string, unknown>
 
-  // Validate role
-  if (!msg.role || !['user', 'assistant'].includes(msg.role as string)) {
-    throw new ValidationError(`Message at index ${index} has invalid role`, 'messages')
-  }
-
-  // Validate content type
-  if (typeof msg.content !== 'string') {
-    throw new ValidationError(`Message at index ${index} content must be a string`, 'messages')
-  }
-
-  // Validate content not empty
-  if (msg.content.length === 0) {
-    throw new ValidationError(`Message at index ${index} content cannot be empty`, 'messages')
-  }
-
-  // Validate content length
-  if (msg.content.length > 10000) {
-    throw new ValidationError(`Message at index ${index} content too long. Maximum 10,000 characters allowed`, 'messages')
-  }
-
-  // Basic XSS prevention - reject obvious script tags
-  if (/<script|javascript:|on\w+\s*=/i.test(msg.content)) {
-    throw new ValidationError(`Message at index ${index} contains potentially malicious content`, 'messages')
+  try {
+    // Use shared validation helpers
+    validateRole(msg.role, 'role')
+    validateContent(msg.content, 'content', 10000, true)
+  } catch (error) {
+    // Re-throw with index information
+    if (error instanceof ValidationError) {
+      throw new ValidationError(`Message at index ${index}: ${error.message}`, 'messages')
+    }
+    throw error
   }
 }
 
@@ -98,41 +93,14 @@ function validatePortfolioStyle(portfolioStyle: unknown): void {
  * Validate pool data parameter
  */
 function validatePoolData(poolData: unknown): void {
-  if (poolData === undefined) {
-    return
-  }
-
-  if (typeof poolData !== 'object' || poolData === null) {
-    throw new ValidationError('Pool data must be an object', 'poolData')
-  }
-
-  // Convert to string to check serialized size
-  const poolDataString = JSON.stringify(poolData)
-  if (poolDataString.length > 50000) {
-    throw new ValidationError('Pool data too large. Maximum 50KB allowed', 'poolData')
-  }
+  validateOptionalObject(poolData, 'poolData', 50000)
 }
 
 /**
  * Validate Solana wallet address
  */
 function validateWalletAddress(walletAddress: unknown): void {
-  if (walletAddress === undefined) {
-    return
-  }
-
-  if (typeof walletAddress !== 'string') {
-    throw new ValidationError('Wallet address must be a string', 'walletAddress')
-  }
-
-  // Basic Solana address validation (32-44 characters, base58)
-  if (walletAddress.length < 32 || walletAddress.length > 44) {
-    throw new ValidationError('Invalid wallet address length', 'walletAddress')
-  }
-
-  if (!/^[1-9A-HJ-NP-Za-km-z]+$/.test(walletAddress)) {
-    throw new ValidationError('Invalid wallet address format', 'walletAddress')
-  }
+  validateWalletAddressHelper(walletAddress, 'walletAddress', false)
 }
 
 /**
@@ -379,37 +347,15 @@ export function validateConversationCreate(body: unknown): ConversationCreateBod
   const { walletAddress, title } = body as Record<string, unknown>;
 
   // Validate wallet address (required)
-  if (!walletAddress || typeof walletAddress !== 'string') {
-    throw new ValidationError('Wallet address is required', 'walletAddress');
-  }
-
-  // Validate wallet address format (Solana base58, 32-44 chars)
-  if (walletAddress.length < 32 || walletAddress.length > 44) {
-    throw new ValidationError('Invalid wallet address length', 'walletAddress');
-  }
-
-  if (!/^[1-9A-HJ-NP-Za-km-z]+$/.test(walletAddress)) {
-    throw new ValidationError('Invalid wallet address format', 'walletAddress');
-  }
+  validateWalletAddressHelper(walletAddress, 'walletAddress', true);
 
   // Validate title (optional)
   if (title !== undefined) {
-    if (typeof title !== 'string') {
-      throw new ValidationError('Title must be a string', 'title');
-    }
-
-    if (title.length > 200) {
-      throw new ValidationError('Title too long. Maximum 200 characters allowed', 'title');
-    }
-
-    // Basic XSS prevention
-    if (/<script|javascript:|on\w+\s*=/i.test(title)) {
-      throw new ValidationError('Title contains potentially malicious content', 'title');
-    }
+    validateContent(title, 'title', 200, false);
   }
 
   return {
-    walletAddress,
+    walletAddress: walletAddress as string,
     title: title as string | undefined,
   };
 }
@@ -425,24 +371,13 @@ export function validateConversationUpdate(body: unknown): ConversationUpdateBod
   const { title } = body as Record<string, unknown>;
 
   // Validate title (required for update)
-  if (!title || typeof title !== 'string') {
+  if (!title) {
     throw new ValidationError('Title is required', 'title');
   }
 
-  if (title.length === 0) {
-    throw new ValidationError('Title cannot be empty', 'title');
-  }
+  validateContent(title, 'title', 200, true);
 
-  if (title.length > 200) {
-    throw new ValidationError('Title too long. Maximum 200 characters allowed', 'title');
-  }
-
-  // Basic XSS prevention
-  if (/<script|javascript:|on\w+\s*=/i.test(title)) {
-    throw new ValidationError('Title contains potentially malicious content', 'title');
-  }
-
-  return { title };
+  return { title: title as string };
 }
 
 /**
@@ -455,56 +390,15 @@ export function validateMessageCreate(body: unknown): MessageCreateBody {
 
   const { role, content, poolData, metadata } = body as Record<string, unknown>;
 
-  // Validate role (required)
-  if (!role || !['user', 'assistant'].includes(role as string)) {
-    throw new ValidationError('Role must be "user" or "assistant"', 'role');
-  }
-
-  // Validate content (required)
-  if (typeof content !== 'string') {
-    throw new ValidationError('Content must be a string', 'content');
-  }
-
-  if (content.length === 0) {
-    throw new ValidationError('Content cannot be empty', 'content');
-  }
-
-  if (content.length > 10000) {
-    throw new ValidationError('Content too long. Maximum 10,000 characters allowed', 'content');
-  }
-
-  // Basic XSS prevention
-  if (/<script|javascript:|on\w+\s*=/i.test(content)) {
-    throw new ValidationError('Content contains potentially malicious content', 'content');
-  }
-
-  // Validate poolData (optional)
-  if (poolData !== undefined) {
-    if (typeof poolData !== 'object' || poolData === null) {
-      throw new ValidationError('Pool data must be an object', 'poolData');
-    }
-
-    const poolDataString = JSON.stringify(poolData);
-    if (poolDataString.length > 50000) {
-      throw new ValidationError('Pool data too large. Maximum 50KB allowed', 'poolData');
-    }
-  }
-
-  // Validate metadata (optional)
-  if (metadata !== undefined) {
-    if (typeof metadata !== 'object' || metadata === null) {
-      throw new ValidationError('Metadata must be an object', 'metadata');
-    }
-
-    const metadataString = JSON.stringify(metadata);
-    if (metadataString.length > 10000) {
-      throw new ValidationError('Metadata too large. Maximum 10KB allowed', 'metadata');
-    }
-  }
+  // Validate all fields using shared helpers
+  validateRole(role, 'role');
+  validateContent(content, 'content', 10000, true);
+  validateOptionalObject(poolData, 'poolData', 50000);
+  validateOptionalObject(metadata, 'metadata', 10000);
 
   return {
     role: role as 'user' | 'assistant',
-    content,
+    content: content as string,
     poolData: poolData as Record<string, unknown> | undefined,
     metadata: metadata as Record<string, unknown> | undefined,
   };
@@ -514,17 +408,6 @@ export function validateMessageCreate(body: unknown): MessageCreateBody {
  * Validate wallet address query parameter
  */
 export function validateWalletAddressParam(walletAddress: unknown): string {
-  if (!walletAddress || typeof walletAddress !== 'string') {
-    throw new ValidationError('Wallet address is required', 'walletAddress');
-  }
-
-  if (walletAddress.length < 32 || walletAddress.length > 44) {
-    throw new ValidationError('Invalid wallet address length', 'walletAddress');
-  }
-
-  if (!/^[1-9A-HJ-NP-Za-km-z]+$/.test(walletAddress)) {
-    throw new ValidationError('Invalid wallet address format', 'walletAddress');
-  }
-
-  return walletAddress;
+  validateWalletAddressHelper(walletAddress, 'walletAddress', true);
+  return walletAddress as string;
 }
