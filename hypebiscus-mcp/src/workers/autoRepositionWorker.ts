@@ -1,30 +1,20 @@
 /**
- * Auto-Reposition Worker
+ * Auto-Reposition Worker (Monitor Only)
  *
- * Background service that automatically repositions out-of-range positions for users
- * who have enabled auto-reposition in their settings.
+ * Background service that monitors out-of-range positions and creates notifications.
+ * The Garden service is the single authority for executing repositions.
  *
- * - Telegram users: Full automation (decrypts key, signs, executes)
- * - Website users: Creates notifications (requires manual approval)
+ * - All users: Creates notifications only (Garden handles Telegram user execution)
+ * - Detects and cleans up stale/ghost positions
  */
 
-import { Connection, Keypair, Transaction } from '@solana/web3.js';
-import { config, logger } from '../config.js';
+import { logger } from '../config.js';
 import { database } from '../services/database.js';
 import { repositionService } from '../services/repositionService.js';
-import { encryptionService } from '../utils/encryption.js';
 
 export class AutoRepositionWorker {
-  private connection: Connection;
   private intervalId: NodeJS.Timeout | null = null;
   private isRunning = false;
-
-  constructor() {
-    this.connection = new Connection(config.solanaRpcUrl, {
-      commitment: 'confirmed',
-      confirmTransactionInitialTimeout: config.requestTimeout,
-    });
-  }
 
   /**
    * Start the auto-reposition worker
@@ -289,7 +279,8 @@ export class AutoRepositionWorker {
       if (
         errorMessage.includes('Position not found') ||
         errorMessage.includes('already closed') ||
-        errorMessage.includes('Unknown position account')
+        errorMessage.includes('Unknown position account') ||
+        errorMessage.includes('No liquidity to remove')
       ) {
         logger.warn(
           `⚠️ Position ${position.positionId} no longer exists on-chain, marking as inactive`
@@ -456,23 +447,28 @@ export class AutoRepositionWorker {
     let repositioned = 0;
     let notifications = 0;
 
+    // NOTE: MCP worker is monitor-only. The Garden service is the single authority
+    // for executing repositions. Both Telegram and website users get notifications here.
     if (canAutoSign) {
-      // Telegram user - execute automatically
-      const success = await this.executeReposition(
-        settings.user.wallets!,
+      // Telegram user - Garden handles execution, MCP only notifies
+      await this.createNotification(
+        settings.userId,
         walletAddress,
         position.positionId,
-        position.poolAddress,
-        settings,
-        analysis
+        'reposition_needed',
+        `Position out of range! Urgency: ${analysis.urgency}. Garden service will auto-reposition.`,
+        {
+          urgency: analysis.urgency,
+          estimatedGasCost: analysis.estimatedGasCost,
+          recommendedStrategy: analysis.recommendedStrategy,
+          source: 'mcp_monitor',
+        }
       );
-
-      if (success) {
-        repositioned = 1;
-        actionTaken = 'repositioned';
-      }
+      notifications = 1;
+      actionTaken = 'notified';
+      notificationSent = true;
     } else {
-      // Website user - create notification
+      // Website user - create notification (requires manual approval)
       await this.createNotification(
         settings.userId,
         walletAddress,
@@ -504,151 +500,8 @@ export class AutoRepositionWorker {
     return { repositioned, notifications };
   }
 
-  /**
-   * Execute reposition for Telegram users (auto-sign)
-   */
-  private async executeReposition(
-    wallet: { encrypted: string; iv: string },
-    walletAddress: string,
-    positionId: string,
-    poolAddress: string,
-    settings: {
-      userId: string;
-      allowedStrategies: any;
-      maxGasCostSol: any;
-    },
-    analysis?: {
-      urgency: string;
-      estimatedGasCost: number;
-      reason: string;
-    }
-  ): Promise<boolean> {
-    try {
-      logger.info(`🔐 Executing auto-reposition for position ${positionId.slice(0, 8)}...`);
-
-      // 1. Prepare unsigned transaction
-      const unsignedTx = await repositionService.prepareRepositionTransaction({
-        positionAddress: positionId,
-        walletAddress,
-        poolAddress,
-        strategy: settings.allowedStrategies[0],
-        maxGasCost: settings.maxGasCostSol.toNumber(),
-        slippage: 100, // 1% default
-      });
-
-      // 2. Decrypt private key
-      const privateKeyJson = encryptionService.decrypt(wallet.encrypted, wallet.iv);
-      const secretKey = new Uint8Array(JSON.parse(privateKeyJson));
-      const keypair = Keypair.fromSecretKey(secretKey);
-
-      // 3. Deserialize and sign transaction
-      const transaction = Transaction.from(Buffer.from(unsignedTx.transaction, 'base64'));
-      transaction.sign(keypair);
-
-      // 4. Send transaction
-      const signature = await this.connection.sendRawTransaction(transaction.serialize(), {
-        skipPreflight: false,
-        preflightCommitment: 'confirmed',
-      });
-
-      logger.info(`📤 Transaction sent: ${signature}`);
-
-      // 5. Confirm transaction
-      const confirmation = await this.connection.confirmTransaction(signature, 'confirmed');
-
-      if (confirmation.value.err) {
-        throw new Error(`Transaction failed: ${JSON.stringify(confirmation.value.err)}`);
-      }
-
-      logger.info(`✅ Transaction confirmed: ${signature}`);
-
-      // 6. Deduct credits
-      const prisma = database.getClient();
-      await prisma.user_credits.update({
-        where: { walletAddress },
-        data: {
-          balance: {
-            decrement: 1,
-          },
-        },
-      });
-
-      // Record transaction
-      const currentBalance = await prisma.user_credits.findUnique({
-        where: { walletAddress },
-        select: { balance: true },
-      });
-
-      await prisma.credit_transactions.create({
-        data: {
-          walletAddress,
-          type: 'usage',
-          amount: -1,
-          balanceBefore: currentBalance?.balance || 1,
-          balanceAfter: (currentBalance?.balance.toNumber() || 1) - 1,
-          description: 'Auto-reposition execution',
-          relatedResourceId: positionId,
-          paymentTxSignature: signature,
-        },
-      });
-
-      // 7. Send success notification
-      await this.sendTelegramNotification(
-        settings.userId,
-        `✅ Position auto-repositioned!\n\nPosition: ${positionId.slice(0, 8)}...\nTransaction: ${signature.slice(0, 8)}...\n\nView on Solscan: https://solscan.io/tx/${signature}`,
-        'reposition_success',
-        {
-          positionId,
-          transactionSignature: signature,
-          solscanUrl: `https://solscan.io/tx/${signature}`,
-        }
-      );
-
-      logger.info(`🎉 Auto-reposition complete for position ${positionId.slice(0, 8)}...`);
-
-      // Log successful execution
-      await this.logRepositionExecution(
-        walletAddress,
-        positionId,
-        true,
-        unsignedTx.metadata.estimatedGasCost ?? null,
-        null,
-        signature,
-        analysis?.reason || 'Position out of range',
-        'auto'
-      );
-
-      return true;
-    } catch (error) {
-      logger.error(`Failed to execute auto-reposition for ${positionId}:`, error);
-
-      // Log failed execution
-      await this.logRepositionExecution(
-        walletAddress,
-        positionId,
-        false,
-        null,
-        null,
-        null,
-        analysis?.reason || 'Position out of range',
-        'auto',
-        error instanceof Error ? error.message : 'Unknown error'
-      );
-
-      // Send error notification
-      await this.sendTelegramNotification(
-        settings.userId,
-        `❌ Auto-reposition failed for position ${positionId.slice(0, 8)}...\n\nError: ${error instanceof Error ? error.message : 'Unknown error'}`,
-        'reposition_failed',
-        {
-          positionId,
-          errorMessage: error instanceof Error ? error.message : 'Unknown error',
-        }
-      );
-
-      return false;
-    }
-  }
+  // NOTE: executeReposition() has been removed. The Garden service is the single
+  // authority for executing repositions. MCP worker is monitor-only.
 
   /**
    * Create notification for website users
@@ -677,48 +530,6 @@ export class AutoRepositionWorker {
     });
 
     logger.info(`📬 Created notification for user ${userId}: ${type}`);
-  }
-
-  /**
-   * Send Telegram notification by queuing in database
-   * The Telegram bot polls telegram_notifications table and sends messages
-   */
-  private async sendTelegramNotification(
-    userId: string,
-    message: string,
-    type: 'reposition_success' | 'reposition_failed' | 'info' | 'warning' | 'error' = 'info',
-    metadata?: Record<string, any>
-  ): Promise<void> {
-    try {
-      const prisma = database.getClient();
-
-      // Get user's telegram ID
-      const user = await prisma.users.findUnique({
-        where: { id: userId },
-        select: { telegramId: true },
-      });
-
-      if (!user || !user.telegramId) {
-        logger.warn(`Cannot send Telegram notification: User ${userId} has no Telegram ID`);
-        return;
-      }
-
-      // Queue notification in database for Telegram bot to pick up
-      await prisma.telegram_notifications.create({
-        data: {
-          telegramId: user.telegramId,
-          message,
-          type,
-          metadata: metadata ? JSON.stringify(metadata) : null,
-          sent: false,
-          createdAt: new Date(),
-        },
-      });
-
-      logger.info(`📱 Queued Telegram notification for user ${user.telegramId} (type: ${type})`);
-    } catch (error) {
-      logger.error('Failed to queue Telegram notification:', error);
-    }
   }
 
   /**
@@ -751,45 +562,6 @@ export class AutoRepositionWorker {
       });
     } catch (error) {
       logger.error('Failed to log position scan:', error);
-    }
-  }
-
-  /**
-   * Log reposition execution
-   */
-  private async logRepositionExecution(
-    walletAddress: string,
-    positionAddress: string,
-    success: boolean,
-    gasCostSol: number | null,
-    feesCollectedUsd: number | null,
-    transactionSignature: string | null,
-    executionReason: string,
-    executionMode: string,
-    error?: string
-  ): Promise<void> {
-    try {
-      const prisma = database.getClient();
-
-      await prisma.reposition_executions.create({
-        data: {
-          walletAddress,
-          positionAddress,
-          subscriptionId: null,
-          success,
-          gasCostSol,
-          feesCollectedUsd,
-          error: error || null,
-          transactionSignature,
-          executionReason,
-          executionMode,
-          createdAt: new Date(),
-        },
-      });
-
-      logger.info(`📊 Logged reposition execution: ${success ? 'SUCCESS' : 'FAILED'}`);
-    } catch (error) {
-      logger.error('Failed to log reposition execution:', error);
     }
   }
 

@@ -2,7 +2,7 @@
 
 import * as cron from 'node-cron';
 import { Prisma } from '@prisma/client';
-import { DlmmService } from './dlmmService';
+import { DlmmService, PositionNotFoundError } from './dlmmService';
 import { WalletService } from './walletService';
 import { Telegraf } from 'telegraf';
 import * as db from './db';
@@ -83,7 +83,7 @@ export class MonitoringService {
    */
   private shouldSendNotification(
     telegramId: bigint,
-    notificationType: 'no_subscription' | 'subscription_check_failed'
+    notificationType: 'no_subscription' | 'subscription_check_failed' | 'error'
   ): boolean {
     const key = `${telegramId}:${notificationType}`;
     const now = Date.now();
@@ -517,7 +517,22 @@ export class MonitoringService {
       await db.updatePositionLastChecked(position.positionId);
 
       // Check if position is out of range
-      const isOutOfRange = await this.dlmmService.isPositionOutOfRange(position.positionId);
+      let isOutOfRange: boolean;
+      try {
+        isOutOfRange = await this.dlmmService.isPositionOutOfRange(position.positionId);
+      } catch (error) {
+        if (error instanceof PositionNotFoundError) {
+          console.log(`⚠️ Position ${position.positionId.substring(0, 8)}... no longer exists on-chain, marking inactive`);
+          try {
+            await db.markPositionClosedOnChain(position.positionId);
+          } catch (dbError: any) {
+            console.error(`❌ Failed to mark stale position inactive: ${dbError.message}`);
+          }
+          return;
+        }
+        throw error;
+      }
+
       if (!isOutOfRange) {
         console.log(`✅ Position ${position.positionId.substring(0, 8)}... in range`);
         return;
@@ -525,7 +540,7 @@ export class MonitoringService {
 
       console.log(`\n⚠️ OUT OF RANGE DETECTED: ${position.positionId.substring(0, 8)}...`);
 
-      // Check cooldown
+      // Check cooldown (includes failure backoff)
       if (!this.dlmmService.canReposition(position.positionId)) {
         console.log(`⏳ Cooldown active, skipping reposition`);
         return;
@@ -568,7 +583,22 @@ export class MonitoringService {
 
     } catch (error: any) {
       console.error(`❌ Failed to reposition:`, error);
-      await this.notifyUser(user.telegramId, 'error', position, null, error);
+
+      // Record failure for exponential backoff
+      this.dlmmService.recordFailedReposition(position.positionId);
+
+      // If max failures exceeded, send a final notification and stop retrying
+      if (this.dlmmService.hasExceededMaxFailures(position.positionId)) {
+        await this.notifyUser(
+          user.telegramId,
+          'error',
+          position,
+          null,
+          new Error(`Reposition failed too many times. Manual intervention required. Last error: ${error.message}`)
+        );
+      } else {
+        await this.notifyUser(user.telegramId, 'error', position, null, error);
+      }
     }
   }
 
@@ -589,17 +619,18 @@ export class MonitoringService {
     newEntryBin: number
   ): Promise<void> {
     try {
-      await prisma.$transaction(async (_tx: Prisma.TransactionClient) => {
-        // Close old position with tracking
+      await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+        // Close old position with tracking (uses tx for atomicity)
         await db.closePositionWithTracking(
           oldPositionId,
           zbtcReturned,
           solReturned,
           exitPrice,
-          exitBin
+          exitBin,
+          tx
         );
 
-        // Create new position with tracking
+        // Create new position with tracking (uses tx for atomicity)
         await db.createPositionWithTracking(
           userId,
           newPositionId,
@@ -607,7 +638,8 @@ export class MonitoringService {
           newZbtcAmount,
           newSolAmount,
           newEntryPrice,
-          newEntryBin
+          newEntryBin,
+          tx
         );
       });
 
@@ -764,8 +796,8 @@ export class MonitoringService {
     error?: Error
   ): Promise<void> {
     try {
-      // Apply throttling for subscription-related notifications to prevent spam
-      if (type === 'no_subscription' || type === 'subscription_check_failed') {
+      // Apply throttling for subscription-related and error notifications to prevent spam
+      if (type === 'no_subscription' || type === 'subscription_check_failed' || type === 'error') {
         if (!this.shouldSendNotification(telegramId, type)) {
           return; // Notification throttled, skip sending
         }

@@ -4,16 +4,38 @@ import { getAssociatedTokenAddress } from '@solana/spl-token';
 import { BN } from '@coral-xyz/anchor';
 import { StrategyType } from '@meteora-ag/dlmm';
 import { PoolStatus } from '../types';
+import * as db from './db';
 
 const BUFFER_BINS = 2;
 const REPOSITION_COOLDOWN_MS = 300000;
 const MAX_CREATE_RETRIES = 3;
 const RETRY_DELAY_MS = 3000;
 
+// Exponential backoff cooldowns for failed repositions
+const FAILURE_COOLDOWNS_MS = [
+  5 * 60 * 1000,    // 1st failure: 5 min
+  15 * 60 * 1000,   // 2nd failure: 15 min
+  60 * 60 * 1000,   // 3rd failure: 1 hour
+  4 * 60 * 60 * 1000, // 4th failure: 4 hours
+];
+const MAX_REPOSITION_FAILURES = 5;
+
+/**
+ * Thrown when a position no longer exists on-chain or has no liquidity.
+ * The caller should mark the position as inactive in the database.
+ */
+export class PositionNotFoundError extends Error {
+  constructor(positionId: string, reason: string) {
+    super(`Position ${positionId} not found on-chain: ${reason}`);
+    this.name = 'PositionNotFoundError';
+  }
+}
+
 export class DlmmService {
   private connection: Connection;
   private pool: DLMM | null = null;
   private lastRepositionTime = new Map<string, number>();
+  private failedRepositionAttempts = new Map<string, { count: number; lastAttempt: number }>();
 
   constructor(rpcUrl: string) {
     this.connection = new Connection(rpcUrl, 'confirmed');
@@ -71,14 +93,12 @@ export class DlmmService {
       const activeBin = await this.pool.getActiveBin();
       
       if (!position || !position.positionData) {
-        console.log(`⚠️ Position not found: ${positionId}`);
-        return true;
+        throw new PositionNotFoundError(positionId, 'Position not found or has no data');
       }
 
       const positionBins = position.positionData.positionBinData || [];
       if (positionBins.length === 0) {
-        console.log(`⚠️ Position has no bins: ${positionId}`);
-        return true;
+        throw new PositionNotFoundError(positionId, 'Position has no bins (zero liquidity)');
       }
 
       const minBinId = Math.min(...positionBins.map((bin: any) => bin.binId));
@@ -115,28 +135,70 @@ export class DlmmService {
       
       return isOutOfRange;
     } catch (error) {
+      if (error instanceof PositionNotFoundError) {
+        throw error; // Let monitoring service handle ghost position cleanup
+      }
       console.error('❌ Failed to check position range:', error);
       return false;
     }
   }
 
   canReposition(positionId: string): boolean {
+    // Check normal cooldown
     const lastTime = this.lastRepositionTime.get(positionId);
-    if (!lastTime) return true;
-    
-    const timeSince = Date.now() - lastTime;
-    const canReposition = timeSince >= REPOSITION_COOLDOWN_MS;
-    
-    if (!canReposition) {
-      const remainingSeconds = Math.round((REPOSITION_COOLDOWN_MS - timeSince) / 1000);
-      console.log(`⏳ Reposition cooldown: ${remainingSeconds}s remaining`);
+    if (lastTime) {
+      const timeSince = Date.now() - lastTime;
+      if (timeSince < REPOSITION_COOLDOWN_MS) {
+        const remainingSeconds = Math.round((REPOSITION_COOLDOWN_MS - timeSince) / 1000);
+        console.log(`⏳ Reposition cooldown: ${remainingSeconds}s remaining`);
+        return false;
+      }
     }
-    
-    return canReposition;
+
+    // Check failure backoff
+    const failureInfo = this.failedRepositionAttempts.get(positionId);
+    if (failureInfo) {
+      if (failureInfo.count >= MAX_REPOSITION_FAILURES) {
+        console.log(`🚫 Position ${positionId.substring(0, 8)}... has failed ${failureInfo.count} times, manual intervention required`);
+        return false;
+      }
+
+      const cooldownIndex = Math.min(failureInfo.count - 1, FAILURE_COOLDOWNS_MS.length - 1);
+      const cooldownMs = FAILURE_COOLDOWNS_MS[cooldownIndex];
+      const timeSinceFailure = Date.now() - failureInfo.lastAttempt;
+
+      if (timeSinceFailure < cooldownMs) {
+        const remainingMinutes = Math.round((cooldownMs - timeSinceFailure) / 60000);
+        console.log(`⏳ Failure backoff: ${remainingMinutes}min remaining (attempt ${failureInfo.count}/${MAX_REPOSITION_FAILURES})`);
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  recordFailedReposition(positionId: string): void {
+    const existing = this.failedRepositionAttempts.get(positionId);
+    const count = existing ? existing.count + 1 : 1;
+    this.failedRepositionAttempts.set(positionId, { count, lastAttempt: Date.now() });
+    console.log(`📛 Recorded failed reposition for ${positionId.substring(0, 8)}... (attempt ${count}/${MAX_REPOSITION_FAILURES})`);
+  }
+
+  resetFailedAttempts(positionId: string): void {
+    if (this.failedRepositionAttempts.has(positionId)) {
+      this.failedRepositionAttempts.delete(positionId);
+      console.log(`✅ Reset failure counter for ${positionId.substring(0, 8)}...`);
+    }
+  }
+
+  hasExceededMaxFailures(positionId: string): boolean {
+    const failureInfo = this.failedRepositionAttempts.get(positionId);
+    return !!failureInfo && failureInfo.count >= MAX_REPOSITION_FAILURES;
   }
 
   private recordReposition(positionId: string): void {
     this.lastRepositionTime.set(positionId, Date.now());
+    this.resetFailedAttempts(positionId);
   }
 
   async createPositionWithTracking(
@@ -520,12 +582,17 @@ export class DlmmService {
       console.log(`${'='.repeat(60)}\n`);
 
       if (!this.canReposition(oldPositionId)) {
-        const lastTime = this.lastRepositionTime.get(oldPositionId)!;
-        const timeSince = Date.now() - lastTime;
-        const remainingSeconds = Math.round((REPOSITION_COOLDOWN_MS - timeSince) / 1000);
-        throw new Error(
-          `Reposition on cooldown. Wait ${remainingSeconds}s.`
-        );
+        const failureInfo = this.failedRepositionAttempts.get(oldPositionId);
+        if (failureInfo && failureInfo.count >= MAX_REPOSITION_FAILURES) {
+          throw new Error('Reposition blocked: too many failures. Manual intervention required.');
+        }
+        const lastTime = this.lastRepositionTime.get(oldPositionId);
+        if (lastTime) {
+          const timeSince = Date.now() - lastTime;
+          const remainingSeconds = Math.round((REPOSITION_COOLDOWN_MS - timeSince) / 1000);
+          throw new Error(`Reposition on cooldown. Wait ${remainingSeconds}s.`);
+        }
+        throw new Error('Reposition on cooldown (failure backoff active).');
       }
 
       await this.initializePool();
@@ -549,6 +616,16 @@ export class DlmmService {
       console.log(`\n🔴 CLOSING OLD POSITION...`);
       await this.closePosition(userKeypair, oldPositionId);
       console.log(`✅ Old position closed`);
+
+      // Safety net: Mark old position inactive in DB immediately after on-chain close.
+      // If createPosition fails below, the ghost position won't loop in monitoring.
+      try {
+        await db.markPositionClosedOnChain(oldPositionId);
+        console.log(`✅ Old position marked inactive in DB (safety net)`);
+      } catch (dbError: any) {
+        console.warn(`⚠️ Could not mark position inactive in DB: ${dbError.message}`);
+        // Non-fatal: the full tracking close will handle this later
+      }
 
       // ✅ FIX: Wait longer for blockchain confirmation and liquidity to settle
       console.log(`⏳ Waiting 5s for liquidity to return and settle...`);

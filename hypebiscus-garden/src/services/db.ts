@@ -1,7 +1,10 @@
 // Database service using Prisma + Supabase
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient, Prisma } from '@prisma/client';
 
 export const prisma = new PrismaClient();
+
+// Type alias for Prisma transaction client
+type PrismaTransactionClient = Prisma.TransactionClient;
 
 // ==================== USER OPERATIONS ====================
 
@@ -260,14 +263,32 @@ export async function getPositionById(positionId: string) {
   });
 }
 
+/**
+ * Mark a position as closed on-chain without full PnL tracking.
+ * Used as a safety net: if createPosition fails after closePosition succeeds,
+ * the old position won't keep looping in the monitoring service.
+ */
+export async function markPositionClosedOnChain(positionId: string) {
+  return prisma.position.update({
+    where: { positionId },
+    data: {
+      isActive: false,
+      closedAt: new Date(),
+    },
+  });
+}
+
 export async function closePositionWithTracking(
   positionId: string,
   zbtcReturned: number,
   solReturned: number,
   exitPrice: number,
-  exitBin: number
+  exitBin: number,
+  tx?: PrismaTransactionClient
 ) {
-  const position = await prisma.position.findUnique({
+  const client = tx || prisma;
+
+  const position = await client.position.findUnique({
     where: { positionId }
   });
 
@@ -285,9 +306,9 @@ export async function closePositionWithTracking(
   const pnlUsd = exitValueUsd - entryValueUsd;
   const pnlPercent = entryValueUsd > 0 ? (pnlUsd / entryValueUsd) * 100 : 0;
 
-  return prisma.position.update({
+  return client.position.update({
     where: { positionId },
-    data: { 
+    data: {
       isActive: false,
       exitPrice,
       exitBin,
@@ -309,9 +330,12 @@ export async function createPositionWithTracking(
   zbtcAmount: number,
   solAmount: number,
   entryPrice: number,
-  entryBin: number
+  entryBin: number,
+  tx?: PrismaTransactionClient
 ) {
-  return prisma.position.create({
+  const client = tx || prisma;
+
+  return client.position.create({
     data: {
       userId,
       positionId,
