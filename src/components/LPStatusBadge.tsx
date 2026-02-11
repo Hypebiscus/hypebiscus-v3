@@ -1,7 +1,7 @@
 // src/components/LPStatusBadge.tsx
 "use client";
 
-import { useWallet } from "@solana/wallet-adapter-react";
+import { useWallet } from "@/hooks/useAppKitWallet";
 import { useHybridPositions } from "@/hooks/useHybridPositions";
 import Link from "next/link";
 

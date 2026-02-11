@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState } from 'react';
-import { useWallet } from '@solana/wallet-adapter-react';
+import { useWallet } from '@/hooks/useAppKitWallet';
 import { Lightning, X, Check, Wallet } from '@phosphor-icons/react';
 import { Button } from '@/components/ui/button';
 import { purchaseSubscription, SUBSCRIPTION_PRICE } from '@/lib/x402Client';

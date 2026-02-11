@@ -2,7 +2,6 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import dynamic from "next/dynamic";
 import {
   NavigationMenu,
   NavigationMenuContent,
@@ -23,13 +22,7 @@ import Link from "next/link";
 import Image from "next/image";
 import { usePathname } from "next/navigation";
 import LPStatusBadge from "@/components/LPStatusBadge";
-
-// Dynamically import WalletMultiButton with ssr disabled
-const WalletMultiButton = dynamic(
-  async () =>
-    (await import("@solana/wallet-adapter-react-ui")).WalletMultiButton,
-  { ssr: false }
-);
+import { useAppKit, useAppKitAccount } from "@reown/appkit/react";
 
 const navItems = [
   { label: "Home", path: "/" },
@@ -38,6 +31,24 @@ const navItems = [
   { label: "Portfolio", path: "/wallet" },
   { label: "Link", path: "/link" },
 ];
+
+function ConnectButton() {
+  const { open } = useAppKit();
+  const { address, isConnected } = useAppKitAccount();
+
+  const label = isConnected && address
+    ? `${address.slice(0, 4)}...${address.slice(-4)}`
+    : "Connect Wallet";
+
+  return (
+    <button
+      onClick={() => open()}
+      className="bg-[#FF4040] hover:bg-[#E03636] text-white font-mono text-sm px-4 py-2 transition-colors cursor-pointer"
+    >
+      {label}
+    </button>
+  );
+}
 
 const Header = () => {
   const [mounted, setMounted] = useState(false);
@@ -140,19 +151,7 @@ const Header = () => {
         </NavigationMenu>
 
         {/* Wallet Connect Button */}
-        {mounted && (
-          <WalletMultiButton
-            style={{
-              backgroundColor: "var(--primary)",
-              padding: "12px 16px",
-              borderRadius: "12px",
-              fontSize: "14px",
-              fontFamily: "var(--font-mono)",
-              height: "100%",
-              lineHeight: "100%",
-            }}
-          />
-        )}
+        {mounted && <ConnectButton />}
       </div>
     </div>
   );

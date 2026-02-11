@@ -45,8 +45,8 @@ const nextConfig: NextConfig = {
         headers: [
           {
             key: 'Access-Control-Allow-Origin',
-            value: process.env.NODE_ENV === 'production' 
-              ? 'https://your-domain.com' // Replace with your production domain
+            value: process.env.NODE_ENV === 'production'
+              ? (process.env.NEXT_PUBLIC_APP_URL || 'https://hypebiscuss.netlify.app')
               : 'http://localhost:3000'
           },
           {

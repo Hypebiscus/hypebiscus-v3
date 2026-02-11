@@ -3,7 +3,7 @@
 import PageTemplate from "@/components/PageTemplate";
 import React, { useState, useEffect } from "react";
 import { Connection, PublicKey } from "@solana/web3.js";
-import { useWallet } from "@solana/wallet-adapter-react";
+import { useWallet } from "@/hooks/useAppKitWallet";
 import DLMM from "@meteora-ag/dlmm";
 import { RangeBar } from "@/components/profile-components/RangeBar";
 import BN from "bn.js";

@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState } from 'react';
-import { useWallet } from '@solana/wallet-adapter-react';
+import { useWallet } from '@/hooks/useAppKitWallet';
 import Header from '@/components/header';
 import { SubscriptionModal } from '@/components/mcp-components/SubscriptionModal';
 import { CreditsPurchaseModal } from '@/components/mcp-components/CreditsPurchaseModal';

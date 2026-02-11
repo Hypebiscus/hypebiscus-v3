@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState } from 'react';
-import { useWallet } from '@solana/wallet-adapter-react';
+import { useWallet } from '@/hooks/useAppKitWallet';
 import { Wallet as WalletIcon, X, Check, CreditCard } from '@phosphor-icons/react';
 import { Button } from '@/components/ui/button';
 import { purchaseCredits, CREDIT_PACKAGES, type CreditPackage } from '@/lib/x402Client';

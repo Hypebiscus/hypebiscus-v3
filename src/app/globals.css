@@ -266,3 +266,11 @@ ul li {
     line-height: 100% !important;
   }
 }
+
+/* Reown AppKit modal theming */
+appkit-button,
+appkit-account-button,
+appkit-network-button {
+  --w3m-accent: #FF4040;
+  --apkt-accent: #FF4040;
+}

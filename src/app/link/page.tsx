@@ -2,7 +2,7 @@
 
 import PageTemplate from "@/components/PageTemplate";
 import React from "react";
-import { useWallet } from "@solana/wallet-adapter-react";
+import { useWallet } from "@/hooks/useAppKitWallet";
 import { WalletLinkingCard } from '@/components/mcp-components/WalletLinkingCard';
 import { WalletDeletionDialog } from '@/components/mcp-components/WalletDeletionDialog';
 import { showToast } from '@/lib/utils/showToast';

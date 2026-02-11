@@ -40,6 +40,7 @@
     "**/._*.tsx",
     "hypebiscus-garden",
     "hypebiscus-mcp",
+    "remotion",
     "src/components/examples"
   ]
 }
