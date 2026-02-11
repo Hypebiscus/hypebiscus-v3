@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef } from 'react';
-import { useWallet } from '@solana/wallet-adapter-react';
+import { useWallet } from '@/hooks/useAppKitWallet';
 import { mcpClient } from '@/lib/services/mcpClient';
 
 // Cache for payment status (30 second TTL)

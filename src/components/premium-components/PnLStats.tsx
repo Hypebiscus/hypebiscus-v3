@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, useState } from 'react';
-import { useWallet } from '@solana/wallet-adapter-react';
+import { useWallet } from '@/hooks/useAppKitWallet';
 import { TrendingUp, TrendingDown, Wallet as WalletIcon } from 'lucide-react';
 import { secureLog } from '@/lib/utils/secureLogger';
 

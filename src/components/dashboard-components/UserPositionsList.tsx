@@ -2,7 +2,7 @@
 
 import React, { useState, useCallback } from "react";
 import { Button } from "@/components/ui/button";
-import { useWallet } from "@solana/wallet-adapter-react";
+import { useWallet } from "@/hooks/useAppKitWallet";
 import { PublicKey } from "@solana/web3.js";
 import DLMM from "@meteora-ag/dlmm";
 import { Loader2, AlertTriangle, CheckCircle, RefreshCw } from "lucide-react";

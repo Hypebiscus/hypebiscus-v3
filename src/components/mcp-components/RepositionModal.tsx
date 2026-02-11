@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { useWallet, useConnection } from '@solana/wallet-adapter-react';
+import { useWallet, useConnection } from '@/hooks/useAppKitWallet';
 import { Transaction } from '@solana/web3.js';
 import { Button } from '@/components/ui/button';
 import { mcpClient } from '@/lib/services/mcpClient';

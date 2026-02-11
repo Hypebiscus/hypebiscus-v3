@@ -29,7 +29,7 @@ import { useMessageRouter } from '@/hooks/useMessageRouter';
 import { mcpClient } from '@/lib/services/mcpClient';
 import { CreditsPurchaseModal } from '@/components/mcp-components/CreditsPurchaseModal';
 import { CreditBalanceIndicator } from './CreditBalanceIndicator';
-import { useWallet } from '@solana/wallet-adapter-react';
+import { useWallet } from '@/hooks/useAppKitWallet';
 import { useRouter } from 'next/navigation';
 import { showToast } from '@/lib/utils/showToast';
 

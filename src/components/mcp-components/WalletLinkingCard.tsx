@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect } from 'react';
-import { useWallet } from '@solana/wallet-adapter-react';
+import { useWallet } from '@/hooks/useAppKitWallet';
 import QRCode from 'react-qr-code';
 import { Button } from '@/components/ui/button';
 import { showToast } from '@/lib/utils/showToast';

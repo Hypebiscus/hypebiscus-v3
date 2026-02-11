@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect } from 'react';
-import { useWallet } from '@solana/wallet-adapter-react';
+import { useWallet } from '@/hooks/useAppKitWallet';
 import { CreditCard, Lightning, Wallet, ArrowsClockwise } from '@phosphor-icons/react';
 import { Button } from '@/components/ui/button';
 import { mcpClient } from '@/lib/services/mcpClient';
