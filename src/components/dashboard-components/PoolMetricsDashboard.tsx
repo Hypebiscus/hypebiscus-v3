@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { mcpClient, PoolMetrics } from '@/lib/services/mcpClient';
-import { useWallet } from '@solana/wallet-adapter-react';
+import { useWallet } from '@/hooks/useAppKitWallet';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { TrendUp, TrendDown, ChartLine, Lightning, CurrencyDollar, ArrowsClockwise } from '@phosphor-icons/react';
 import { Skeleton } from '@/components/ui/skeleton';

@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import Script from "next/script";
 import "./globals.css";
-import { WalletContextProvider } from "@/context/WalletContextProvider";
+import { AppKitProvider } from "@/context/AppKitProvider";
 import { Toaster } from "@/components/ui/sonner";
 
 const geistSans = Geist({
@@ -40,10 +40,10 @@ export default function RootLayout({
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
         suppressHydrationWarning={true}
       >
-        <WalletContextProvider>
+        <AppKitProvider>
           {children}
-        </WalletContextProvider>
-        <Toaster /> 
+        </AppKitProvider>
+        <Toaster />
       </body>
     </html>
   );

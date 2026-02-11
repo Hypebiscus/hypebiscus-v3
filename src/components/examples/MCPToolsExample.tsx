@@ -8,7 +8,7 @@
  */
 
 import { useState } from 'react';
-import { useWallet } from '@solana/wallet-adapter-react';
+import { useWallet } from '@/hooks/useAppKitWallet';
 import { mcpClient } from '@/lib/mcp-client';
 
 export function MCPToolsExample() {

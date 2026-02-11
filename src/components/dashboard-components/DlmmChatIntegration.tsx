@@ -4,7 +4,7 @@ import React, { useEffect, useRef, useCallback } from 'react';
 import { useMeteoraDlmmService } from '@/lib/meteora/meteoraDlmmService';
 import { useMeteoraPositionService } from '@/lib/meteora/meteoraPositionService';
 import { parseDlmmCommand, CommandType, CommandResult } from '@/lib/meteora/meteoraChatCommands';
-import { useWallet } from '@solana/wallet-adapter-react';
+import { useWallet } from '@/hooks/useAppKitWallet';
 // import { BN } from 'bn.js';
 
 // Define types for the data objects

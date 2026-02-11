@@ -1,6 +1,6 @@
 // src/hooks/useEnhancedWallet.ts
 
-import { useWallet } from '@solana/wallet-adapter-react';
+import { useWallet } from '@/hooks/useAppKitWallet';
 import { useCallback, useMemo } from 'react';
 import { Connection, PublicKey, Transaction } from '@solana/web3.js';
 

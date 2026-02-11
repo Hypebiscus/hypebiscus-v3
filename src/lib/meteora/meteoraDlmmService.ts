@@ -4,7 +4,7 @@
 import DLMM, { StrategyType, autoFillYByStrategy } from '@meteora-ag/dlmm';
 import { Connection, PublicKey, Transaction, LAMPORTS_PER_SOL } from '@solana/web3.js';
 import { BN } from '@coral-xyz/anchor';
-import { useWallet } from '@solana/wallet-adapter-react';
+import { useWallet } from '@/hooks/useAppKitWallet';
 
 // Add interface definitions for proper typing
 interface BinArray {

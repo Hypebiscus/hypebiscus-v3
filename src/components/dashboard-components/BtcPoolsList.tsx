@@ -2,7 +2,7 @@
 
 import React from "react";
 import { Button } from "@/components/ui/button";
-import { useWallet } from "@solana/wallet-adapter-react";
+import { useWallet } from "@/hooks/useAppKitWallet";
 import { ArrowSquareIn} from "@phosphor-icons/react";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 import { FormattedPool } from "@/lib/utils/poolUtils";

@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Loader2, AlertTriangle, CheckCircle, ArrowRight, RefreshCw } from "lucide-react";
-import { useWallet } from '@solana/wallet-adapter-react';
+import { useWallet } from '@/hooks/useAppKitWallet';
 import { useMeteoraDlmmService } from "@/lib/meteora/meteoraDlmmService";
 import { useMeteoraPositionService } from "@/lib/meteora/meteoraPositionService";
 import type { ExistingBinRange } from "@/lib/meteora/meteoraPositionService";
