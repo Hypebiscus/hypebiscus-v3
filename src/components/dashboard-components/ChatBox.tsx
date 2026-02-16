@@ -919,8 +919,10 @@ const ChatBox: React.FC<ChatBoxProps> = ({
       // Show immediate loading message with the specific filter
       const tokenNames: Record<string, string> = {
         'wbtc-sol': 'wBTC-SOL',
-        'zbtc-sol': 'zBTC-SOL', 
-        'cbbtc-sol': 'cbBTC-SOL'
+        'zbtc-sol': 'zBTC-SOL',
+        'cbbtc-sol': 'cbBTC-SOL',
+        'eth-sol': 'ETH-SOL',
+        'sol-usdc': 'SOL-USDC'
       };
       
       const tokenName = tokenNames[tokenFilter] || tokenFilter;
@@ -1111,6 +1113,8 @@ const ChatBox: React.FC<ChatBoxProps> = ({
       'wbtc-sol': 'wBTC-SOL',
       'zbtc-sol': 'zBTC-SOL',
       'cbbtc-sol': 'cbBTC-SOL',
+      'eth-sol': 'ETH-SOL',
+      'sol-usdc': 'SOL-USDC',
       'btc': 'All BTC'
     };
 

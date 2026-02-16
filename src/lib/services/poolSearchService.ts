@@ -50,13 +50,13 @@ export interface ProcessPoolParams {
 
 // Configuration constants
 const POOL_SEARCH_CONFIG: PoolSearchConfig = {
-  searchTerms: ["wbtc-sol", "zbtc-sol", "cbbtc-sol"],
-  allowedBinSteps: [5, 10, 15, 50],
+  searchTerms: ["wbtc-sol", "zbtc-sol", "cbbtc-sol", "eth-sol", "sol-usdc"],
+  allowedBinSteps: [1, 2, 4, 5, 8, 10, 15, 20, 50, 80],
   minAPY: 0.03,
   minFees: 5,
 };
 
-const BROADER_SEARCH_TERMS = ["wbtc", "zbtc", "cbbtc"];
+const BROADER_SEARCH_TERMS = ["wbtc", "zbtc", "cbbtc", "eth", "usdc"];
 
 /**
  * Pool Search Service Class
@@ -72,10 +72,14 @@ export class PoolSearchService {
    * Get search terms based on token filter
    */
   private getSearchTermsForFilter(tokenFilter?: string): string[] {
-    if (!tokenFilter || tokenFilter === 'btc') {
+    if (!tokenFilter || tokenFilter === 'all') {
       return this.config.searchTerms; // Return all search terms
     }
-    
+
+    if (tokenFilter === 'btc') {
+      return ['wbtc-sol', 'zbtc-sol', 'cbbtc-sol'];
+    }
+
     // Return specific term based on filter
     switch (tokenFilter) {
       case 'wbtc-sol':
@@ -84,10 +88,21 @@ export class PoolSearchService {
         return ['zbtc-sol', 'zbtc'];
       case 'cbbtc-sol':
         return ['cbbtc-sol', 'cbbtc'];
+      case 'eth-sol':
+        return ['eth-sol', 'eth'];
+      case 'sol-usdc':
+        return ['sol-usdc', 'usdc'];
       default:
         return this.config.searchTerms;
     }
   }
+
+  /**
+   * List of all valid pair names
+   */
+  private static readonly VALID_PAIR_NAMES = [
+    "wbtc-sol", "zbtc-sol", "cbbtc-sol", "eth-sol", "sol-usdc"
+  ];
 
   /**
    * Helper method to check if a pair is valid
@@ -96,7 +111,7 @@ export class PoolSearchService {
     const name = pair.name.toLowerCase();
     const binStep = pair.bin_step || 0;
 
-    return (name === "wbtc-sol" || name === "zbtc-sol" || name === "cbbtc-sol") &&
+    return PoolSearchService.VALID_PAIR_NAMES.includes(name) &&
            !name.includes("jito") &&
            this.config.allowedBinSteps.includes(binStep);
   }
@@ -106,17 +121,7 @@ export class PoolSearchService {
    */
   private filterValidPairs(pairs: ApiPool[]): ApiPool[] {
     return pairs.filter((pair) => {
-      const name = pair.name.toLowerCase();
-      const binStep = pair.bin_step || 0;
-
-      const isValidPair =
-        (name === "wbtc-sol" || name === "zbtc-sol" || name === "cbbtc-sol") &&
-        !name.includes("jito") &&
-        this.config.allowedBinSteps.includes(binStep);
-
-      if (isValidPair) {
-      }
-      return isValidPair;
+      return this.isValidPair(pair);
     });
   }
 
@@ -145,6 +150,10 @@ export class PoolSearchService {
           return name.includes('zbtc') && name.includes('sol');
         case 'cbbtc-sol':
           return name.includes('cbbtc') && name.includes('sol');
+        case 'eth-sol':
+          return name.includes('eth') && name.includes('sol') && !name.includes('btc');
+        case 'sol-usdc':
+          return name.includes('sol') && name.includes('usdc');
         default:
           return this.isValidPair(pair);
       }
@@ -292,7 +301,10 @@ export class PoolSearchService {
       'wbtc-sol': 'wBTC-SOL',
       'zbtc-sol': 'zBTC-SOL',
       'cbbtc-sol': 'cbBTC-SOL',
-      'btc': 'All BTC'
+      'eth-sol': 'ETH-SOL',
+      'sol-usdc': 'SOL-USDC',
+      'btc': 'All BTC',
+      'all': 'All Pools'
     };
     
     const tokenLabel = tokenFilter ? filterLabels[tokenFilter] || tokenFilter : 'BTC';
@@ -375,12 +387,12 @@ export class PoolSearchService {
     
     const tokenLabel = tokenFilter ? filterLabels[tokenFilter] || tokenFilter : 'BTC';
     
-    return `I searched specifically for ${tokenLabel} liquidity pools paired with SOL on Solana but couldn't find any matching pools at the moment. This could be due to:
+    return `I searched specifically for ${tokenLabel} liquidity pools on Solana but couldn't find any matching pools at the moment. This could be due to:
     1. API limitations or temporary unavailability
     2. These specific ${tokenLabel} pools might not be indexed by our data provider
     3. The pools might exist but with different naming conventions
-    
-    Try selecting a different Bitcoin token filter or check back in a few moments.`;
+
+    Try selecting a different token filter or check back in a few moments.`;
   }
 }
 

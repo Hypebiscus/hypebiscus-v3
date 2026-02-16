@@ -24,14 +24,26 @@ const BtcPoolButtons: React.FC<BtcPoolButtonsProps> = ({
     },
     {
       id: 'zbtc-sol',
-      label: 'zBTC-SOL', 
+      label: 'zBTC-SOL',
       description: 'Zeus Bitcoin',
       icon: Bitcoin
     },
     {
       id: 'cbbtc-sol',
       label: 'cbBTC-SOL',
-      description: 'Coinbase Bitcoin', 
+      description: 'Coinbase Bitcoin',
+      icon: Bitcoin
+    },
+    {
+      id: 'eth-sol',
+      label: 'ETH-SOL',
+      description: 'Ethereum',
+      icon: Bitcoin
+    },
+    {
+      id: 'sol-usdc',
+      label: 'SOL-USDC',
+      description: 'SOL / USDC',
       icon: Bitcoin
     },
     {
@@ -44,7 +56,7 @@ const BtcPoolButtons: React.FC<BtcPoolButtonsProps> = ({
 
   return (
     <div className="flex flex-col space-y-3 mb-4">
-      <p className="text-sm text-sub-text mb-1">Filter by Bitcoin Token:</p>
+      <p className="text-sm text-sub-text mb-1">Filter by Token Pair:</p>
       
       {/* Desktop Layout - 2x2 Grid with Portfolio Button Style */}
       <div className="hidden md:grid md:grid-cols-2 gap-2">

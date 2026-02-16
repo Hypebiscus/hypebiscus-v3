@@ -27,21 +27,33 @@ const BtcFilterModal: React.FC<BtcFilterModalProps> = ({
   const filterOptions: BtcFilterOption[] = [
     {
       id: "wbtc-sol",
-      title: "wBTC",
+      title: "wBTC-SOL",
       description: "Wrapped Bitcoin - most established and liquid BTC pools on Solana.",
       icon: "₿",
     },
     {
       id: "zbtc-sol",
-      title: "zBTC",
+      title: "zBTC-SOL",
       description: "Zeus Bitcoin - native Bitcoin bridged through Zeus Network.",
       icon: "⚡",
     },
     {
       id: "cbbtc-sol",
-      title: "cbBTC",
+      title: "cbBTC-SOL",
       description: "Coinbase Bitcoin - institutional-grade Bitcoin backed by Coinbase.",
       icon: "🏛️",
+    },
+    {
+      id: "eth-sol",
+      title: "ETH-SOL",
+      description: "Ethereum paired with SOL - high volume and deep liquidity.",
+      icon: "⟠",
+    },
+    {
+      id: "sol-usdc",
+      title: "SOL-USDC",
+      description: "SOL paired with USDC stablecoin - the most traded pair on Solana.",
+      icon: "💲",
     },
   ];
 
@@ -60,19 +72,19 @@ const BtcFilterModal: React.FC<BtcFilterModalProps> = ({
     <Dialog open={isOpen} onOpenChange={onClose}>
       <DialogContent aria-describedby="btc-filter-description">
         <DialogTitle className="text-center text-2xl font-bold">
-          Choose Bitcoin Token Type
+          Choose Token Pair
         </DialogTitle>
         <DialogDescription id="btc-filter-description" className="text-center text-sub-text">
-          Select your preferred Bitcoin token type to find the most relevant liquidity pools for your investment strategy.
+          Select your preferred token pair to find the most relevant liquidity pools for your investment strategy.
         </DialogDescription>
-        
+
         {/* Modal Content */}
-        <div className='pt-8'>  
+        <div className='pt-8'>
           {/* Subtitle */}
           <div className="mb-6 flex flex-col items-start ">
-            <h3 className="text-md white mb-2">Select Your Preferred Bitcoin Token</h3>
+            <h3 className="text-md white mb-2">Select Your Preferred Token Pair</h3>
             <p className="text-sm text-sub-text">
-              Focus on specific Bitcoin token types to find the most relevant
+              Focus on specific token pairs to find the most relevant
               liquidity pools for your investment strategy.
             </p>
           </div>

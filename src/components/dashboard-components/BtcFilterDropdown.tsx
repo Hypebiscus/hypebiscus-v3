@@ -21,20 +21,32 @@ const BtcFilterDropdown: React.FC<BtcFilterDropdownProps> = ({
   const filterOptions = [
     {
       id: 'wbtc-sol',
-      label: 'wBTC', // Changed from 'wBTC-SOL'
+      label: 'wBTC',
       description: 'Wrapped Bitcoin pools',
       icon: Bitcoin
     },
     {
       id: 'zbtc-sol',
-      label: 'zBTC', // Changed from 'zBTC-SOL'
+      label: 'zBTC',
       description: 'Zeus Bitcoin pools',
       icon: Bitcoin
     },
     {
       id: 'cbbtc-sol',
-      label: 'cbBTC', // Changed from 'cbBTC-SOL'
+      label: 'cbBTC',
       description: 'Coinbase Bitcoin pools',
+      icon: Bitcoin
+    },
+    {
+      id: 'eth-sol',
+      label: 'ETH',
+      description: 'Ethereum / SOL pools',
+      icon: Bitcoin
+    },
+    {
+      id: 'sol-usdc',
+      label: 'SOL-USDC',
+      description: 'SOL / USDC stablecoin pools',
       icon: Bitcoin
     }
   ];
