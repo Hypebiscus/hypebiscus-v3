@@ -1365,6 +1365,10 @@ const ChatBox: React.FC<ChatBoxProps> = ({
         <BtcFilterModal
           isOpen={isBtcFilterModalOpen}
           onClose={() => setIsBtcFilterModalOpen(false)}
+          onBack={() => {
+            setIsBtcFilterModalOpen(false);
+            setIsPortfolioStyleModalOpen(true);
+          }}
           onSelectFilter={handleSelectBtcFilter}
         />
       </div>

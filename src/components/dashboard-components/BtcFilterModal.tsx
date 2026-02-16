@@ -1,12 +1,14 @@
 "use client";
 
 import React, { useState } from "react";
+import Image from "next/image";
 import { Dialog, DialogContent, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 
 interface BtcFilterModalProps {
   isOpen: boolean;
   onClose: () => void;
+  onBack?: () => void;
   onSelectFilter: (filter: string) => void;
 }
 
@@ -17,9 +19,17 @@ type BtcFilterOption = {
   icon: string;
 };
 
+const TOKEN_LOGOS: Record<string, string> = {
+  btc: "https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/3NZ9JMVBmGAqocybic2c7LQCJScmgsAZ6vQqTDzcqmJh/logo.png",
+  eth: "https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/7vfCXTUXx5WJV5JADk17DUJ4ksgau7utNKj4b963voxs/logo.png",
+  sol: "https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/So11111111111111111111111111111111111111112/logo.png",
+  usdc: "https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v/logo.png",
+};
+
 const BtcFilterModal: React.FC<BtcFilterModalProps> = ({
   isOpen,
   onClose,
+  onBack,
   onSelectFilter,
 }) => {
   const [selectedFilter, setSelectedFilter] = useState<string | null>(null);
@@ -28,32 +38,32 @@ const BtcFilterModal: React.FC<BtcFilterModalProps> = ({
     {
       id: "wbtc-sol",
       title: "wBTC-SOL",
-      description: "Wrapped Bitcoin - most established and liquid BTC pools on Solana.",
-      icon: "₿",
+      description: "Wrapped Bitcoin and Solana",
+      icon: "btc,sol",
     },
     {
       id: "zbtc-sol",
       title: "zBTC-SOL",
-      description: "Zeus Bitcoin - native Bitcoin bridged through Zeus Network.",
-      icon: "⚡",
+      description: "Zeus Bitcoin and Solana",
+      icon: "btc,sol",
     },
     {
       id: "cbbtc-sol",
       title: "cbBTC-SOL",
-      description: "Coinbase Bitcoin - institutional-grade Bitcoin backed by Coinbase.",
-      icon: "🏛️",
+      description: "Coinbase Bitcoin and Solana",
+      icon: "btc,sol",
     },
     {
       id: "eth-sol",
       title: "ETH-SOL",
-      description: "Ethereum paired with SOL - high volume and deep liquidity.",
-      icon: "⟠",
+      description: "Wrapped Ethereum and Solana",
+      icon: "eth,sol",
     },
     {
       id: "sol-usdc",
       title: "SOL-USDC",
-      description: "SOL paired with USDC stablecoin - the most traded pair on Solana.",
-      icon: "💲",
+      description: "Solana and USDC Stablecoin",
+      icon: "sol,usdc",
     },
   ];
 
@@ -80,15 +90,6 @@ const BtcFilterModal: React.FC<BtcFilterModalProps> = ({
 
         {/* Modal Content */}
         <div className='pt-8'>
-          {/* Subtitle */}
-          <div className="mb-6 flex flex-col items-start ">
-            <h3 className="text-md white mb-2">Select Your Preferred Token Pair</h3>
-            <p className="text-sm text-sub-text">
-              Focus on specific token pairs to find the most relevant
-              liquidity pools for your investment strategy.
-            </p>
-          </div>
-          
           {/* Options */}
           <div className="space-y-3 mb-8">
             {filterOptions.map((filter) => {
@@ -115,16 +116,22 @@ const BtcFilterModal: React.FC<BtcFilterModalProps> = ({
                 >
                   <div className="flex items-center">
                     <div className="flex-1">
-                      <div className="flex items-start gap-2">
-                        <span className="mr-3 text-2xl" aria-hidden="true">{filter.icon}</span>
-                        <div>
-                          <h3 id={`filter-${filter.id}-title`} className="font-medium text-white">
-                            {filter.title}
-                          </h3>
-                          <p id={`filter-${filter.id}-desc`} className="text-sm text-white mt-2">
-                            {filter.description}
-                          </p>
+                      <div className="flex items-center gap-3">
+                        <div className="flex -space-x-2" aria-hidden="true">
+                          {filter.icon.split(",").map((token) => (
+                            <Image
+                              key={token}
+                              src={TOKEN_LOGOS[token]}
+                              alt={token}
+                              width={28}
+                              height={28}
+                              className="rounded-full ring-2 ring-black"
+                            />
+                          ))}
                         </div>
+                        <h3 id={`filter-${filter.id}-title`} className="font-medium text-white">
+                          {filter.title} <span id={`filter-${filter.id}-desc`} className="text-sm text-sub-text">- {filter.description}</span>
+                        </h3>
                       </div>
                     </div>
                   </div>
@@ -133,15 +140,26 @@ const BtcFilterModal: React.FC<BtcFilterModalProps> = ({
             })}
           </div>
           
-          {/* Continue Button */}
-          <Button
-            variant="default"
-            onClick={handleConfirm}
-            disabled={!selectedFilter}
-            className="w-full"
-          >
-            Continue
-          </Button>
+          {/* Action Buttons */}
+          <div className="flex gap-3">
+            {onBack && (
+              <Button
+                variant="outline"
+                onClick={onBack}
+                className="flex-1"
+              >
+                Back
+              </Button>
+            )}
+            <Button
+              variant="default"
+              onClick={handleConfirm}
+              disabled={!selectedFilter}
+              className="flex-1"
+            >
+              Continue
+            </Button>
+          </div>
         </div>
       </DialogContent>
     </Dialog>

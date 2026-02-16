@@ -2,8 +2,16 @@
 "use client";
 
 import { useState } from "react";
+import Image from "next/image";
 import { Button } from "@/components/ui/button";
-import { ChevronDown, Bitcoin } from "lucide-react";
+import { ChevronDown } from "lucide-react";
+
+const TOKEN_LOGOS: Record<string, string> = {
+  btc: "https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/3NZ9JMVBmGAqocybic2c7LQCJScmgsAZ6vQqTDzcqmJh/logo.png",
+  eth: "https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/7vfCXTUXx5WJV5JADk17DUJ4ksgau7utNKj4b963voxs/logo.png",
+  sol: "https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/So11111111111111111111111111111111111111112/logo.png",
+  usdc: "https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v/logo.png",
+};
 
 interface BtcFilterDropdownProps {
   onFilterSelect: (filter: string) => void;
@@ -23,31 +31,31 @@ const BtcFilterDropdown: React.FC<BtcFilterDropdownProps> = ({
       id: 'wbtc-sol',
       label: 'wBTC',
       description: 'Wrapped Bitcoin pools',
-      icon: Bitcoin
+      logos: ['btc', 'sol'],
     },
     {
       id: 'zbtc-sol',
       label: 'zBTC',
       description: 'Zeus Bitcoin pools',
-      icon: Bitcoin
+      logos: ['btc', 'sol'],
     },
     {
       id: 'cbbtc-sol',
       label: 'cbBTC',
       description: 'Coinbase Bitcoin pools',
-      icon: Bitcoin
+      logos: ['btc', 'sol'],
     },
     {
       id: 'eth-sol',
       label: 'ETH',
       description: 'Ethereum / SOL pools',
-      icon: Bitcoin
+      logos: ['eth', 'sol'],
     },
     {
       id: 'sol-usdc',
       label: 'SOL-USDC',
-      description: 'SOL / USDC stablecoin pools',
-      icon: Bitcoin
+      description: 'SOL / USDC pools',
+      logos: ['sol', 'usdc'],
     }
   ];
 
@@ -92,9 +100,8 @@ const BtcFilterDropdown: React.FC<BtcFilterDropdownProps> = ({
           {/* Dropdown Content */}
           <div className="absolute top-full left-0 mt-1 bg-[#161616] border border-primary rounded-lg shadow-lg z-20 overflow-hidden w-[280px] sm:w-[320px]">
             {filterOptions.map((option) => {
-              const Icon = option.icon;
               const isSelected = activeFilter === option.id;
-              
+
               return (
                 <button
                   key={option.id}
@@ -104,7 +111,18 @@ const BtcFilterDropdown: React.FC<BtcFilterDropdownProps> = ({
                     isSelected ? 'bg-primary/10' : ''
                   } ${isLoading ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
                 >
-                  <Icon className="w-5 h-5 text-primary flex-shrink-0" />
+                  <div className="flex -space-x-1.5 flex-shrink-0">
+                    {option.logos.map((token) => (
+                      <Image
+                        key={token}
+                        src={TOKEN_LOGOS[token]}
+                        alt={token}
+                        width={22}
+                        height={22}
+                        className="rounded-full ring-1 ring-black"
+                      />
+                    ))}
+                  </div>
                   <div className="flex-1 min-w-0">
                     <div className="text-white text-base font-medium truncate">
                       {option.label}

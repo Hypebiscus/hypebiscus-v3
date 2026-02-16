@@ -68,14 +68,6 @@ const PortfolioStyleModal: React.FC<PortfolioStyleModalProps> = ({
         
         {/* Modal Content */}
         <div className='pt-8'>  
-          {/* Subtitle */}
-          <div className="mb-6 flex flex-col items-start ">
-            <h3 className="text-md white mb-2">Select Your Preferred Investment Style</h3>
-            <p className="text-sm text-sub-text">
-              Choose how you want to grow your portfolio. Your selection helps us recommend the best liquidity pools for your risk comfort and goals.
-            </p>
-          </div>
-          
           {/* Options */}
           <div className="space-y-3 mb-8" role="radiogroup" aria-labelledby="portfolio-style-description">
             {portfolioStyles.map((style) => {
