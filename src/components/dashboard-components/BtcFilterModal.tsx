@@ -84,8 +84,8 @@ const BtcFilterModal: React.FC<BtcFilterModalProps> = ({
         <DialogTitle className="text-center text-2xl font-bold">
           Choose Token Pair
         </DialogTitle>
-        <DialogDescription id="btc-filter-description" className="text-center text-sub-text">
-          Select your preferred token pair to find the most relevant liquidity pools for your investment strategy.
+        <DialogDescription id="btc-filter-description" className="sr-only">
+          Choose token pair
         </DialogDescription>
 
         {/* Modal Content */}

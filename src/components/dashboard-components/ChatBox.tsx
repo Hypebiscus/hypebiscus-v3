@@ -1272,7 +1272,7 @@ const ChatBox: React.FC<ChatBoxProps> = ({
             Welcome to Hypebiscus
           </h1>
           <p className="text-white text-center font-medium max-w-md mb-6 text-sm md:text-base break-words">
-            Your smart assistant for exploring BTC liquidity in the Solana DeFi ecosystem.
+            Explore ethical DeFi with ease
           </p>
           
           {/* Feature list - commented out

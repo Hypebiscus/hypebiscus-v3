@@ -28,19 +28,19 @@ const PortfolioStyleModal: React.FC<PortfolioStyleModalProps> = ({
     {
       id: 'conservative',
       title: 'Conservative',
-      description: 'Protect your capital by focusing on stable, audited pools-lower risk, safe but smaller returns.',
+      description: 'Stable pools, lower risk, smaller returns.',
       icon: '🛡️'
     },
     {
       id: 'moderate',
       title: 'Moderate',
-      description: 'Balance growth and stability using a mix of established and growth pools-moderate risk, steadier returns.',
+      description: 'Mixed pools, balanced risk and returns.',
       icon: '⚖️'
     },
     {
       id: 'aggressive',
       title: 'Aggressive',
-      description: 'Maximize returns with higher-yield, more volatile pools-expect bigger ups and downs.',
+      description: 'Higher-yield pools, higher risk, bigger returns.',
       icon: '🚀'
     }
   ];
@@ -62,8 +62,8 @@ const PortfolioStyleModal: React.FC<PortfolioStyleModalProps> = ({
         <DialogTitle className='text-center text-2xl font-bold'>
           Choose Your Portfolio Style
         </DialogTitle>
-        <DialogDescription id="portfolio-style-description" className="text-center text-sub-text">
-          Select your preferred investment style to get recommendations that match your risk tolerance and goals.
+        <DialogDescription id="portfolio-style-description" className="sr-only">
+          Choose your portfolio style
         </DialogDescription>
         
         {/* Modal Content */}
